@@ -1,0 +1,514 @@
+#! /usr/bin/python
+
+'''
+ Copyright 2019-present SK Telecom
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+     http://www.apache.org/licenses/LICENSE-2.0
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+'''
+
+import os
+import shlex
+import sys
+import time
+import json
+import requests
+import subprocess
+import pyroute2
+import ConfigParser
+import socket
+import struct
+import random
+from netaddr import *
+from random import randint
+
+CNI_VERSION = "0.3.1"
+INSIDE_MTU = 1500
+
+SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
+BRIDGE_NAME = "kbr-int"
+
+VETH_PREFIX = "veth"
+ETH_PREFIX = "eth"
+
+def call_popen(cmd):
+    '''
+    Executes a shell command.
+    
+    :param	cmd: shell command to be executed
+    :return	standard output of the executed result
+    '''
+    child = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    output = child.communicate()
+    if child.returncode:
+        raise RuntimeError("Fatal error executing %s" % (cmd))
+    if len(output) == 0 or output[0] is None:
+        output = ""
+    else:
+        output = output[0].decode("utf8").strip()
+    return output
+
+def call_prog(prog, args_list):
+    '''
+    Executes shell command along with a set of arguments.
+    
+    :param	prog:      program binary path
+                args_list: arguments of the program
+    :return	standard output of the executed result
+    '''
+    cmd = [prog, "--timeout=5", "-vconsole:off"] + args_list
+    return call_popen(cmd)
+
+def ovs_vsctl(*args):
+    '''
+    A helper method to execute ovs-vsctl.
+    
+    :param	args:	 arguments pointer
+    :return	executed result of ovs-vsctl
+    '''
+    return call_prog("ovs-vsctl", list(args))
+
+def ovs_ofctl(*args):
+    '''
+    A helper method to execute ovs-ofctl.
+
+    :param	args:	arguments pointer
+    :return	executed result of ovs-ofctl
+    '''
+    return call_prog("ovs-ofctl", list(args))
+
+def request(endpoint, method, data):
+    '''
+    A helper method to issue REST API call.
+    
+    :param	endpoint:   REST endpoint
+                method:     REST method
+                data:       REST data
+    :return	REST response
+    '''
+    cf = ConfigParser.ConfigParser()
+    cf.read(SONA_CONFIG_FILE)
+
+    url = cf.get("onos", "url_path")
+    username = cf.get("onos", "username")
+    password = cf.get("onos", "password")
+
+    if url is None:
+        url = 'http://localhost:8181/onos/k8snetworking'
+
+    if username is None:
+        username = 'onos'
+
+    if password is None:
+        password = 'rocks'
+
+    url = url + "/" + endpoint
+    
+    headers = {}
+    headers['Content-Type'] = 'application/json'
+    session = requests.session()
+
+    if method == "get":
+        resp = session.get(url, auth=(username, password))
+    elif method == "post":
+        resp = session.post(url, data.encode('utf-8'), headers=headers, auth=(username, password))
+    elif method == "put":
+        resp = session.put(url, data.encode('utf-8'), headers=headers, auth=(username, password))
+    elif method == "delete":
+        resp = session.delete(url, auth=(username, password))
+    else:
+        print("The given method is not supported.")
+        return None
+
+    return resp
+
+def create_port(port_id, mac_address, ip_address):
+    '''
+    Creates a container port.
+    
+    :param	port_id:	port identifier
+                mac_address:	MAC address
+                ip_address:	IP address
+    :return	REST response
+    '''
+    network_id = get_network_id()
+    dpid = get_dpid()
+    
+    data = json.dumps({"portId": port_id, "networkId": network_id, 
+                       "macAddress": mac_address, "ipAddress": ip_address, 
+                       "deviceId": dpid})
+
+    resp = request("port", "post", data)
+
+def delete_port(port_id):
+    '''
+    Deletes a container port.
+
+    :param	port_id:	port identifier
+    :return	REST response
+    '''
+    endpoint = "port/" + port_id
+    resp = request(endpoint, "delete", None)
+
+def create_network():
+    '''
+    Creates a new container network.
+    
+    :return	REST response
+    '''
+    cf = ConfigParser.ConfigParser()
+    cf.read(SONA_CONFIG_FILE)
+
+    net_id = cf.get("network", "id")
+    net_name = cf.get("network", "name")
+    net_type = cf.get("network", "type")
+    segment_id = cf.get("network", "segment_id")
+    gateway_ip = cf.get("network" "gateway_ip")
+    cidr = cf.get("network", "cidr")
+    mtu = cf.get("network", "mtu")
+
+    data = json.dumps({"networkId": net_id, "name": net_name, 
+                       "type": net_type, "segmentId": segment_id, 
+                       "gatewayIp": gateway_ip, "cidr": cidr, "mtu": mtu})
+
+    resp = request("network", "post", data)
+    
+    '''
+    if resp.status_code == 201:
+        print("Successfully created the network " + net_name)
+        return True
+    else:
+        print("Failed to create the network " + net_name)
+        return False
+    '''
+
+def get_network_id():
+    '''
+    Obtains the network identifier.
+    
+    :return	network identifier
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        return cf.get("network", "id")
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get network ID " + str(e))
+
+def get_dpid():
+    '''
+    Obtains the data plane identifier.
+
+    :return	data plane identifier
+    '''
+    try:
+        of_result = ovs_ofctl('show', BRIDGE_NAME)
+        
+        if "dpid:" in of_result:
+            first_line = of_result.splitlines()[0]
+            return "of:" + first_line.split("dpid:", 1)[1]
+        else:
+            return None
+
+    except Exception as e:
+        raise SonaCniException(105, "failure get DPID " + str(e))
+
+def get_gw_ip():
+    '''
+    Obtains the gateway IP address.
+
+    :return	gateway IP address
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        return cf.get("network", "gateway_ip")
+    
+    except Exception as e:
+        raise SonaCniException(102, "failure get gateway IP " + str(e))
+
+def get_cidr():
+    '''
+    Obtains the network CIDR.
+
+    :return 	network CIDR
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        return cf.get("network", "cidr");
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get CIDR " + str(e))
+
+def allocate_ip(network_id):
+    '''
+    Allocates a new IP address.
+
+    :param   network_id:	network identifier
+    :return  allocated_ip:	a newly allocated IP address
+    '''
+
+    endpoint = "ipam" + "/" + network_id
+    
+    try:
+        ipamJson = request(endpoint, "get", None).json()
+        allocated_ip = ipamJson["ipam"]["ipAddress"]
+    
+    except Exception as e:
+        raise SonaCniException(106, "failure get allocated IP " + str(e))
+
+    return allocated_ip
+
+def release_ip(ip):
+    '''
+    Releases an existing IP address.
+
+    :param  ip:   IP address to be released
+    '''
+
+    try:
+        network_id = cf.get("network", "id")
+        endpoint = "ipam" + "/" + network_id + "/" + ip
+        request(endpoint, "delete", None)
+
+    except Exception as e:
+        raise SonaCniException(106, "failure release IP " + str(e))
+
+def activate_gw_intf():
+    '''
+    Activates the host default gateway interface.
+    '''
+    ipdb = pyroute2.IPDB(mode='explicit')
+    gw_ip = get_gw_ip()
+    cidr = get_cidr()
+    try:
+        with ipdb.interfaces[BRIDGE_NAME] as bridge_iface:
+            bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
+            bridge_iface.up()
+
+        # configure the default gateway route
+        route = ipdb.routes.get[cidr]
+        if route is None:
+            ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+
+    except Exception as e:
+        raise SonaCniException(108, "failure activate gateway interface " + str(e))
+
+def setup_interface(container_id, cni_netns, cni_ifname,
+                    mac_address, ip_address, gateway_ip):
+    '''
+    Sets up the host interface and container interface.
+    Note that host interface is referred as outside-interface, while
+    container interface is referred as inside-interface.
+
+    :param  container_id:   container identifier
+            cni_netns:      CNI network namespace
+            cni_ifname:     CNI interface name
+            mac_address:    MAC address
+            ip_address:     IP address with CIDR attached (e.g., 10.10.10.2/24)
+            gateway_ip:     gateway IP address
+
+    '''
+    try:
+        if not os.path.exists("/var/run/netns"):
+            os.makedirs("/var/run/netns")
+    except Exception as e:
+        raise SonaCniException(100, "failure in creation of netns directory")
+
+    try:
+        ipdb = pyroute2.IPDB(mode='explicit')
+        veth_outside = VETH_PREFIX + container_id[:11]
+        veth_inside = ETH_PREFIX + container_id[:12]
+        ipdb.create(ifname=veth_outside, kind='veth', peer=veth_inside)
+        with ipdb.interfaces[veth_outside] as veth_outside_iface:
+            # Up the outer interface
+            veth_outside_iface.up()
+            veth_outside_idx = veth_outside_iface.index
+
+        # Create a link for the container namespace
+        # This is necessary also when using pyroute2
+        # See https://github.com/svinota/pyroute2/issues/290
+        netns_dst = "/var/run/netns/%s" % container_id
+        if not os.path.isfile(netns_dst):
+            command = "ln -s %s %s" % (cni_netns, netns_dst)
+            call_popen(shlex.split(command))
+
+        with ipdb.interfaces[veth_inside] as veth_inside_iface:
+            # Move the inner veth inside the container namespace
+            veth_inside_iface.net_ns_fd = container_id
+
+    except Exception as e:
+        raise SonaCniException(100, "veth pair setup failure" + str(e))
+
+    try:
+        # Change the name of veth_inside to $cni_ifname
+        ns_ipdb = pyroute2.IPDB(nl=pyroute2.NetNS(container_id),
+                                mode='explicit')
+        ifindex = 0
+        # Configure veth_inside: set name, mtu, mac address, ip, and bring up
+        with ns_ipdb.interfaces[veth_inside] as veth_inside_iface:
+            ifindex = veth_inside_iface.index
+            veth_inside_iface.ifname = cni_ifname
+            veth_inside_iface.address = mac_address
+            veth_inside_iface.mtu = INSIDE_MTU
+            veth_inside_iface.add_ip(ip_address)
+            veth_inside_iface.up()
+
+        # Set the gateway
+        ns_ipdb.routes.add(dst='default', oif=ifindex).commit()
+
+        return veth_outside
+    except Exception as e:
+        if veth_outside_idx:
+            pyroute2.IPRoute().link('del', index=veth_outside_idx)
+        raise SonaCniException(100, "container interface setup failure" + str(e))
+
+def randomMAC():
+    '''
+    Randomly generates MAC address.
+
+    :return MAC address
+    '''
+    mac = [ 0x52, 0x54, 0x00,
+            random.randint(0x00, 0x7f),
+            random.randint(0x00, 0xff),
+            random.randint(0x00, 0xff) ]
+    return ':'.join(map(lambda x: "%02x" % x, mac))
+
+def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
+    '''
+    Adds OVS interface port when receiving CNI add command.
+
+    :param  cni_ifname:     CNI interface name
+            cni_netns:      CNI network name space
+            namespace:      namespace
+            pod_name:       container POD name
+            container_id:   container identifier
+
+    '''
+    ip_address = allocate_ip(get_network_id())
+    gateway_ip = get_gw_ip()
+    local_cidr = get_cidr()
+    ip_address = ip_address + '/' + local_cidr.split('/')[1]
+    mac_address = randomMAC()
+
+    veth_outside = setup_interface(container_id, cni_netns, cni_ifname,
+                                   mac_address, ip_address, gateway_ip)
+
+    iface_id = "%s_%s" % (namespace, pod_name)
+    
+    # create_network()
+    create_port(container_id[:31], mac_address, ip_address.split('/')[0])
+
+    try:
+        ovs_vsctl('add-port', BRIDGE_NAME, veth_outside, '--', 'set',
+                  'interface', veth_outside,
+                  'external_ids:attached_mac=%s' % mac_address,
+                  'external_ids:iface-id=%s' % iface_id,
+                  'external_ids:ip_address=%s' % ip_address)
+    except Exception as e:
+        raise SonaCniException(106, "failure in plugging pod interface" + str(e))
+
+    # activate_gw_intf()
+
+    output = json.dumps({'ip_address': ip_address,
+                         'gateway_ip': gateway_ip, 'mac_address': mac_address})
+    print(output)
+
+def cni_del(container_id, cni_ifname):
+    '''
+    Removes OVS interface port when receiving CNI remove command.
+
+    :param  container_id:   container identifier
+            cni_ifname:     CNI interface name
+
+    '''
+
+    try:
+        veth_outside = VETH_PREFIX + container_id[:11]
+        ovs_vsctl("del-port", veth_outside)
+    except Exception:
+        message = "failed to delete OVS port %s" % veth_outside
+        print(message)
+    ipv4_address = '127.0.0.1'
+
+    ns_ipdb = pyroute2.IPDB(nl=pyroute2.NetNS(container_id),
+                            mode='explicit')
+    with ns_ipdb.interfaces[cni_ifname] as inside_iface:
+        ipv4_address = inside_iface.ipaddr.ipv4[0]['address']
+    ns_ipdb.release()
+    
+    release_ip(ipv4_address)
+
+    delete_port(container_id[:31])
+
+    command = "rm -f /var/run/netns/%s" % container_id
+    call_popen(shlex.split(command))
+
+def main():
+    try:
+        cni_command = os.environ['CNI_COMMAND']
+        cni_ifname = os.environ['CNI_IFNAME']
+        cni_netns = os.environ['CNI_NETNS']
+        cni_args = os.environ['CNI_ARGS']
+
+        cni_args_dict = dict(i.split("=") for i in cni_args.split(";"))
+        namespace = cni_args_dict['K8S_POD_NAMESPACE']
+        pod_name = cni_args_dict['K8S_POD_NAME']
+        container_id = cni_args_dict['K8S_POD_INFRA_CONTAINER_ID']
+    except Exception as e:
+        raise SonaCniException(100, 'required CNI variables missing', str(e))
+
+    if cni_command == "ADD":
+        cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id)
+    elif cni_command == "DEL":
+        cni_del(container_id, cni_ifname)
+
+class SonaCniException(Exception):
+
+    def __init__(self, code, message, details=None):
+        '''
+        The exception constructor which handles the SONA CNI related exceptions.
+
+        :param  code:       exception code
+                message:    exception message
+                details:    detailed message of this exception
+        '''
+        super(SonaCniException, self).__init__("%s - %s" % (code, message))
+        self._code = code
+        self._msg = message
+        self._details = details
+
+    def cni_error(self):
+        '''
+        Handles the CNI related errors.
+
+        :return  exception details including CNI version, code and message
+        '''
+        error_data = {'cniVersion': CNI_VERSION,
+                      'code': self._code,
+                      'message': self._msg}
+        if self._details:
+            error_data['details'] = self._details
+        return json.dumps(error_data)
+
+if __name__ == '__main__':
+    try:
+        main()
+    except SonaCniException as e:
+        print(e.cni_error())
+        sys.exit(1)
+    except Exception as e:
+        error = {'cniVersion': CNI_VERSION, 'code': 200,
+                 'message': str(e)}
+        print(json.dumps(error))
+        sys.exit(1)
+
