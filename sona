@@ -156,12 +156,32 @@ def delete_port(port_id):
     endpoint = "port/" + port_id
     resp = request(endpoint, "delete", None)
 
+def has_network():
+    '''
+    Checks the existence of the network with given network identifier.
+
+    :return true if network has already been existed in control plane, false otherwise
+    '''
+    cf = ConfigParser.ConfigParser()
+    cf.read(SONA_CONFIG_FILE)
+
+    net_id = cf.get("network", "id")
+    endpoint = "network" + "/" + "exist" + "/" + net_id
+    resp = request(endpoint, "get", None)
+    
+    if resp is None:
+        return False
+    else:
+        result = resp.json()
+        return result["result"]
+
 def create_network():
     '''
     Creates a new container network.
     
     :return	REST response
     '''
+
     cf = ConfigParser.ConfigParser()
     cf.read(SONA_CONFIG_FILE)
 
@@ -169,24 +189,15 @@ def create_network():
     net_name = cf.get("network", "name")
     net_type = cf.get("network", "type")
     segment_id = cf.get("network", "segment_id")
-    gateway_ip = cf.get("network" "gateway_ip")
+    gateway_ip = cf.get("network", "gateway_ip")
     cidr = cf.get("network", "cidr")
     mtu = cf.get("network", "mtu")
-
+    
     data = json.dumps({"networkId": net_id, "name": net_name, 
                        "type": net_type, "segmentId": segment_id, 
-                       "gatewayIp": gateway_ip, "cidr": cidr, "mtu": mtu})
+                       "gatewayIp": gateway_ip, "cidr": cidr})
 
     resp = request("network", "post", data)
-    
-    '''
-    if resp.status_code == 201:
-        print("Successfully created the network " + net_name)
-        return True
-    else:
-        print("Failed to create the network " + net_name)
-        return False
-    '''
 
 def get_network_id():
     '''
@@ -394,6 +405,8 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
             container_id:   container identifier
 
     '''
+    if has_network() is False:
+        create_network()
     ip_address = allocate_ip(get_network_id())
     gateway_ip = get_gw_ip()
     local_cidr = get_cidr()
@@ -404,8 +417,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
                                    mac_address, ip_address, gateway_ip)
 
     iface_id = "%s_%s" % (namespace, pod_name)
-    
-    # create_network()
+
     create_port(container_id[:31], mac_address, ip_address.split('/')[0])
 
     try:
@@ -431,7 +443,9 @@ def cni_del(container_id, cni_ifname):
             cni_ifname:     CNI interface name
 
     '''
-
+    if has_network() is False:
+        create_network()
+    
     try:
         veth_outside = VETH_PREFIX + container_id[:11]
         ovs_vsctl("del-port", veth_outside)
