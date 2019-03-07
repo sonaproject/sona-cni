@@ -259,6 +259,20 @@ def get_cidr():
     except Exception as e:
         raise SonaCniException(102, "failure get CIDR " + str(e))
 
+def get_transient_cidr():
+    '''
+    Obtains the transient network CIDR.
+    
+    :return     transient network CIDR
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        return cf.get("network", "transient_cidr");
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get transient CIDR " + str(e))
+
 def allocate_ip(network_id):
     '''
     Allocates a new IP address.
@@ -300,15 +314,27 @@ def activate_gw_intf():
     ipdb = pyroute2.IPDB(mode='explicit')
     gw_ip = get_gw_ip()
     cidr = get_cidr()
+    transient_cidr = get_transient_cidr()
+
     try:
         with ipdb.interfaces[BRIDGE_NAME] as bridge_iface:
-            bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
-            bridge_iface.up()
-
-        # configure the default gateway route
-        route = ipdb.routes.get[cidr]
-        if route is None:
+            if bridge_iface.operstate != "up":
+                bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
+                bridge_iface.up()
+        
+        local_found = False
+        transient_found = False
+        for route in ipdb.routes:
+            if route['dst'] == cidr:
+                local_found = True
+            if route['dst'] == transient_cidr:
+                transient_found = True
+        
+        if not local_found:
             ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+
+        if not transient_found:
+            ipdb.routes.add(dst=transient_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
 
     except Exception as e:
         raise SonaCniException(108, "failure activate gateway interface " + str(e))
@@ -429,7 +455,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     except Exception as e:
         raise SonaCniException(106, "failure in plugging pod interface" + str(e))
 
-    # activate_gw_intf()
+    activate_gw_intf()
 
     output = json.dumps({'ip_address': ip_address,
                          'gateway_ip': gateway_ip, 'mac_address': mac_address})
@@ -446,12 +472,18 @@ def cni_del(container_id, cni_ifname):
     if has_network() is False:
         create_network()
     
+    '''
     try:
         veth_outside = VETH_PREFIX + container_id[:11]
         ovs_vsctl("del-port", veth_outside)
     except Exception:
         message = "failed to delete OVS port %s" % veth_outside
         print(message)
+    '''
+
+    veth_outside = VETH_PREFIX + container_id[:11]
+    ovs_vsctl("del-port", veth_outside)
+
     ipv4_address = '127.0.0.1'
 
     ns_ipdb = pyroute2.IPDB(nl=pyroute2.NetNS(container_id),
