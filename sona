@@ -40,7 +40,7 @@ ETH_PREFIX = "eth"
 def call_popen(cmd):
     '''
     Executes a shell command.
-    
+
     :param	cmd: shell command to be executed
     :return	standard output of the executed result
     '''
@@ -57,7 +57,7 @@ def call_popen(cmd):
 def call_prog(prog, args_list):
     '''
     Executes shell command along with a set of arguments.
-    
+
     :param	prog:      program binary path
                 args_list: arguments of the program
     :return	standard output of the executed result
@@ -68,7 +68,7 @@ def call_prog(prog, args_list):
 def ovs_vsctl(*args):
     '''
     A helper method to execute ovs-vsctl.
-    
+
     :param	args:	 arguments pointer
     :return	executed result of ovs-vsctl
     '''
@@ -86,7 +86,7 @@ def ovs_ofctl(*args):
 def request(endpoint, method, data):
     '''
     A helper method to issue REST API call.
-    
+
     :param	endpoint:   REST endpoint
                 method:     REST method
                 data:       REST data
@@ -109,7 +109,7 @@ def request(endpoint, method, data):
         password = 'rocks'
 
     url = url + "/" + endpoint
-    
+
     headers = {}
     headers['Content-Type'] = 'application/json'
     session = requests.session()
@@ -131,7 +131,7 @@ def request(endpoint, method, data):
 def create_port(port_id, mac_address, ip_address):
     '''
     Creates a container port.
-    
+
     :param	port_id:	port identifier
                 mac_address:	MAC address
                 ip_address:	IP address
@@ -139,9 +139,9 @@ def create_port(port_id, mac_address, ip_address):
     '''
     network_id = get_network_id()
     dpid = get_dpid()
-    
-    data = json.dumps({"portId": port_id, "networkId": network_id, 
-                       "macAddress": mac_address, "ipAddress": ip_address, 
+
+    data = json.dumps({"portId": port_id, "networkId": network_id,
+                       "macAddress": mac_address, "ipAddress": ip_address,
                        "deviceId": dpid})
 
     resp = request("port", "post", data)
@@ -168,7 +168,7 @@ def has_network():
     net_id = cf.get("network", "id")
     endpoint = "network" + "/" + "exist" + "/" + net_id
     resp = request(endpoint, "get", None)
-    
+
     if resp is None:
         return False
     else:
@@ -178,7 +178,7 @@ def has_network():
 def create_network():
     '''
     Creates a new container network.
-    
+
     :return	REST response
     '''
 
@@ -192,9 +192,9 @@ def create_network():
     gateway_ip = cf.get("network", "gateway_ip")
     cidr = cf.get("network", "cidr")
     mtu = cf.get("network", "mtu")
-    
-    data = json.dumps({"networkId": net_id, "name": net_name, 
-                       "type": net_type, "segmentId": segment_id, 
+
+    data = json.dumps({"networkId": net_id, "name": net_name,
+                       "type": net_type, "segmentId": segment_id,
                        "gatewayIp": gateway_ip, "cidr": cidr})
 
     resp = request("network", "post", data)
@@ -202,7 +202,7 @@ def create_network():
 def get_network_id():
     '''
     Obtains the network identifier.
-    
+
     :return	network identifier
     '''
     try:
@@ -221,7 +221,7 @@ def get_dpid():
     '''
     try:
         of_result = ovs_ofctl('show', BRIDGE_NAME)
-        
+
         if "dpid:" in of_result:
             first_line = of_result.splitlines()[0]
             return "of:" + first_line.split("dpid:", 1)[1]
@@ -241,7 +241,7 @@ def get_gw_ip():
         cf = ConfigParser.ConfigParser()
         cf.read(SONA_CONFIG_FILE)
         return cf.get("network", "gateway_ip")
-    
+
     except Exception as e:
         raise SonaCniException(102, "failure get gateway IP " + str(e))
 
@@ -262,7 +262,7 @@ def get_cidr():
 def get_transient_cidr():
     '''
     Obtains the transient network CIDR.
-    
+
     :return     transient network CIDR
     '''
     try:
@@ -282,11 +282,11 @@ def allocate_ip(network_id):
     '''
 
     endpoint = "ipam" + "/" + network_id
-    
+
     try:
         ipamJson = request(endpoint, "get", None).json()
         allocated_ip = ipamJson["ipam"]["ipAddress"]
-    
+
     except Exception as e:
         raise SonaCniException(106, "failure get allocated IP " + str(e))
 
@@ -321,7 +321,7 @@ def activate_gw_intf():
             if bridge_iface.operstate != "up":
                 bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
                 bridge_iface.up()
-        
+
         local_found = False
         transient_found = False
         for route in ipdb.routes:
@@ -329,7 +329,7 @@ def activate_gw_intf():
                 local_found = True
             if route['dst'] == transient_cidr:
                 transient_found = True
-        
+
         if not local_found:
             ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
 
@@ -471,17 +471,13 @@ def cni_del(container_id, cni_ifname):
     '''
     if has_network() is False:
         create_network()
-    
-    '''
-    try:
-        veth_outside = VETH_PREFIX + container_id[:11]
-        ovs_vsctl("del-port", veth_outside)
-    except Exception:
-        message = "failed to delete OVS port %s" % veth_outside
-        print(message)
-    '''
 
     veth_outside = VETH_PREFIX + container_id[:11]
+    ports = ovs_vsctl("list-ports", BRIDGE_NAME)
+
+    if veth_outside not in ports:
+        return
+
     ovs_vsctl("del-port", veth_outside)
 
     ipv4_address = '127.0.0.1'
@@ -491,7 +487,7 @@ def cni_del(container_id, cni_ifname):
     with ns_ipdb.interfaces[cni_ifname] as inside_iface:
         ipv4_address = inside_iface.ipaddr.ipv4[0]['address']
     ns_ipdb.release()
-    
+
     release_ip(ipv4_address)
 
     delete_port(container_id[:31])
@@ -557,4 +553,3 @@ if __name__ == '__main__':
                  'message': str(e)}
         print(json.dumps(error))
         sys.exit(1)
-
