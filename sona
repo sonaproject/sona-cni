@@ -322,7 +322,8 @@ def activate_gw_intf():
                 bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
                 bridge_iface.up()
                 iface_desc = ovs_ofctl('dump-ports-desc', BRIDGE_NAME)
-                mac_address = iface_desc.split('addr:', 1)[1][:17]
+                keyword = '(' + BRIDGE_NAME + '): addr:'
+                mac_address = iface_desc.split(keyword, 1)[1][:17]
                 ovs_vsctl('set', 'Interface', BRIDGE_NAME,
                           'external-ids:mac_address=%s' % mac_address)
 
