@@ -29,7 +29,7 @@ from netaddr import *
 from random import randint
 
 CNI_VERSION = "0.3.1"
-INSIDE_MTU = 1500
+INSIDE_MTU = 1400
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
 BRIDGE_NAME = "kbr-int"
@@ -41,8 +41,8 @@ def call_popen(cmd):
     '''
     Executes a shell command.
 
-    :param	cmd: shell command to be executed
-    :return	standard output of the executed result
+    :param    cmd: shell command to be executed
+    :return    standard output of the executed result
     '''
     child = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     output = child.communicate()
@@ -58,9 +58,9 @@ def call_prog(prog, args_list):
     '''
     Executes shell command along with a set of arguments.
 
-    :param	prog:      program binary path
+    :param    prog:      program binary path
                 args_list: arguments of the program
-    :return	standard output of the executed result
+    :return    standard output of the executed result
     '''
     cmd = [prog, "--timeout=5", "-vconsole:off"] + args_list
     return call_popen(cmd)
@@ -69,8 +69,8 @@ def ovs_vsctl(*args):
     '''
     A helper method to execute ovs-vsctl.
 
-    :param	args:	 arguments pointer
-    :return	executed result of ovs-vsctl
+    :param    args:     arguments pointer
+    :return    executed result of ovs-vsctl
     '''
     return call_prog("ovs-vsctl", list(args))
 
@@ -78,8 +78,8 @@ def ovs_ofctl(*args):
     '''
     A helper method to execute ovs-ofctl.
 
-    :param	args:	arguments pointer
-    :return	executed result of ovs-ofctl
+    :param    args:    arguments pointer
+    :return    executed result of ovs-ofctl
     '''
     return call_prog("ovs-ofctl", list(args))
 
@@ -87,10 +87,10 @@ def request(endpoint, method, data):
     '''
     A helper method to issue REST API call.
 
-    :param	endpoint:   REST endpoint
+    :param    endpoint:   REST endpoint
                 method:     REST method
                 data:       REST data
-    :return	REST response
+    :return    REST response
     '''
     cf = ConfigParser.ConfigParser()
     cf.read(SONA_CONFIG_FILE)
@@ -132,10 +132,10 @@ def create_port(port_id, mac_address, ip_address):
     '''
     Creates a container port.
 
-    :param	port_id:	port identifier
-                mac_address:	MAC address
-                ip_address:	IP address
-    :return	REST response
+    :param    port_id:    port identifier
+                mac_address:    MAC address
+                ip_address:    IP address
+    :return    REST response
     '''
     network_id = get_network_id()
     dpid = get_dpid()
@@ -150,8 +150,8 @@ def delete_port(port_id):
     '''
     Deletes a container port.
 
-    :param	port_id:	port identifier
-    :return	REST response
+    :param    port_id:    port identifier
+    :return    REST response
     '''
     endpoint = "port/" + port_id
     resp = request(endpoint, "delete", None)
@@ -165,7 +165,7 @@ def has_network():
     cf = ConfigParser.ConfigParser()
     cf.read(SONA_CONFIG_FILE)
 
-    net_id = cf.get("network", "id")
+    net_id = socket.gethostname()
     endpoint = "network" + "/" + "exist" + "/" + net_id
     resp = request(endpoint, "get", None)
 
@@ -179,14 +179,14 @@ def create_network():
     '''
     Creates a new container network.
 
-    :return	REST response
+    :return    REST response
     '''
 
     cf = ConfigParser.ConfigParser()
     cf.read(SONA_CONFIG_FILE)
 
-    net_id = cf.get("network", "id")
-    net_name = cf.get("network", "name")
+    net_id = socket.gethostname()
+    net_name = socket.gethostname()
     net_type = cf.get("network", "type")
     segment_id = cf.get("network", "segment_id")
     gateway_ip = cf.get("network", "gateway_ip")
@@ -203,12 +203,10 @@ def get_network_id():
     '''
     Obtains the network identifier.
 
-    :return	network identifier
+    :return    network identifier
     '''
     try:
-        cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
-        return cf.get("network", "id")
+        return socket.gethostname()
 
     except Exception as e:
         raise SonaCniException(102, "failure get network ID " + str(e))
@@ -217,7 +215,7 @@ def get_dpid():
     '''
     Obtains the data plane identifier.
 
-    :return	data plane identifier
+    :return    data plane identifier
     '''
     try:
         of_result = ovs_ofctl('show', BRIDGE_NAME)
@@ -235,7 +233,7 @@ def get_gw_ip():
     '''
     Obtains the gateway IP address.
 
-    :return	gateway IP address
+    :return    gateway IP address
     '''
     try:
         cf = ConfigParser.ConfigParser()
@@ -249,7 +247,7 @@ def get_cidr():
     '''
     Obtains the network CIDR.
 
-    :return 	network CIDR
+    :return     network CIDR
     '''
     try:
         cf = ConfigParser.ConfigParser()
@@ -277,8 +275,8 @@ def allocate_ip(network_id):
     '''
     Allocates a new IP address.
 
-    :param   network_id:	network identifier
-    :return  allocated_ip:	a newly allocated IP address
+    :param   network_id:    network identifier
+    :return  allocated_ip:    a newly allocated IP address
     '''
 
     endpoint = "ipam" + "/" + network_id
@@ -300,7 +298,7 @@ def release_ip(ip):
     '''
 
     try:
-        network_id = cf.get("network", "id")
+        network_id = socket.gethostname()
         endpoint = "ipam" + "/" + network_id + "/" + ip
         request(endpoint, "delete", None)
 
