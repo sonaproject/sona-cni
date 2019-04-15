@@ -37,6 +37,9 @@ BRIDGE_NAME = "kbr-int"
 VETH_PREFIX = "veth"
 ETH_PREFIX = "eth"
 
+DEFAULT_TRANSIENT_CIDR = "172.10.0.0/16"
+DEFAULT_SERVICE_CIDR = "10.96.0.0/12"
+
 def call_popen(cmd):
     '''
     Executes a shell command.
@@ -266,10 +269,30 @@ def get_transient_cidr():
     try:
         cf = ConfigParser.ConfigParser()
         cf.read(SONA_CONFIG_FILE)
-        return cf.get("network", "transient_cidr");
+        if cf.has_option("network", "transient_cidr") is True:
+            return cf.get("network", "transient_cidr")
+        else:
+            return DEFAULT_TRANSIENT_CIDR
 
     except Exception as e:
         raise SonaCniException(102, "failure get transient CIDR " + str(e))
+
+def get_service_cidr():
+    '''
+    Obtains the service network CIDR.
+
+    :return     service network CIDR
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        if cf.has_option("network", "service_cidr") is True:
+            return cf.get("network", "service_cidr")
+        else:
+            return DEFAULT_SERVICE_CIDR
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get service CIDR " + str(e))
 
 def allocate_ip(network_id):
     '''
@@ -313,6 +336,7 @@ def activate_gw_intf():
     gw_ip = get_gw_ip()
     cidr = get_cidr()
     transient_cidr = get_transient_cidr()
+    service_cidr = get_service_cidr()
 
     try:
         with ipdb.interfaces[BRIDGE_NAME] as bridge_iface:
@@ -327,17 +351,23 @@ def activate_gw_intf():
 
         local_found = False
         transient_found = False
+        service_found = False
         for route in ipdb.routes:
             if route['dst'] == cidr:
                 local_found = True
             if route['dst'] == transient_cidr:
                 transient_found = True
+            if route['dst'] == service_cidr:
+                service_found = True
 
         if not local_found:
             ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
 
         if not transient_found:
             ipdb.routes.add(dst=transient_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+
+        if not service_found:
+            ipdb.routes.add(dst=service_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
 
     except Exception as e:
         raise SonaCniException(108, "failure activate gateway interface " + str(e))
