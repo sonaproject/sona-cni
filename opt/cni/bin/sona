@@ -25,6 +25,7 @@ import ConfigParser
 import socket
 import struct
 import random
+import netifaces
 from netaddr import *
 from random import randint
 
@@ -33,6 +34,7 @@ INSIDE_MTU = 1400
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
 BRIDGE_NAME = "kbr-int"
+EXT_BRIDGE = "kbr-ex"
 
 VETH_PREFIX = "veth"
 ETH_PREFIX = "eth"
@@ -308,6 +310,23 @@ def get_service_cidr():
     except Exception as e:
         raise SonaCniException(102, "failure get service CIDR " + str(e))
 
+def get_external_intf():
+    '''
+    Obtains the external interface name.
+
+    :return     external interface name
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        if cf.has_option("network", "external_intf") is True:
+            return cf.get("network", "external_intf")
+        else:
+            return None
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get external interface " + str(e))
+
 def allocate_ip(network_id):
     '''
     Allocates a new IP address.
@@ -341,6 +360,43 @@ def release_ip(ip):
 
     except Exception as e:
         raise SonaCniException(106, "failure release IP " + str(e))
+
+def is_interface_up(interface):
+    '''
+    Checks whether the given network interface is up or not.
+    '''
+    addr = netifaces.ifaddresses(interface)
+    return netifaces.AF_INET in addr
+
+def activate_ex_intf():
+    '''
+    Activates the external interface.
+    '''
+    ipdb = pyroute2.IPDB(mode='explicit')
+    ex_intf = get_external_intf()
+    
+    if ex_intf is None:
+        return
+    
+    if is_interface_up(ex_intf) is False:
+        return
+
+    intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
+    if ex_intf in intfs:
+        return
+
+    try:
+        ovs_vsctl('add-port', EXT_BRIDGE, ex_intf)
+        ip_address = netifaces.ifaddresses(ex_intf)[netifaces.AF_INET][0]['addr']
+        intf_desc = ovs_ofctl('dump-ports-desc', EXT_BRIDGE)
+        keyword = '(' + ex_intf + '): addr:'
+        mac_address = intf_desc.split(keyword, 1)[1][:17]
+        ovs_vsctl('set', 'Interface', EXT_BRIDGE,
+                         'external-ids:mac_address=%s' % mac_address,
+                         'external-ids:ip_address=%s' % ip_address, 
+                         'external-ids:ext_interface=%s' % ex_intf)
+    except Exception as e:
+        raise SonaCniException(108, "failure activate external interface " + str(e))
 
 def activate_gw_intf():
     '''
@@ -510,6 +566,8 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         raise SonaCniException(106, "failure in plugging pod interface" + str(e))
 
     activate_gw_intf()
+
+    activate_ex_intf()
 
     output = json.dumps({'ip_address': ip_address,
                          'gateway_ip': gateway_ip, 'mac_address': mac_address})
