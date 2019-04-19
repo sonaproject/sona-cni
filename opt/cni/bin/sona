@@ -35,6 +35,8 @@ INSIDE_MTU = 1400
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
 BRIDGE_NAME = "kbr-int"
 EXT_BRIDGE = "kbr-ex"
+INT_TO_EXT_PATCH_PORT = "kbr-int-ex"
+EXT_TO_INT_PATCH_PORT = "phy-kbr-ex"
 
 VETH_PREFIX = "veth"
 ETH_PREFIX = "eth"
@@ -368,6 +370,32 @@ def is_interface_up(interface):
     addr = netifaces.ifaddresses(interface)
     return netifaces.AF_INET in addr
 
+def annotate_patch_ports():
+    '''
+    Adds annotations to patch ports.
+    '''
+    int_intfs = ovs_vsctl('list-ifaces', BRIDGE_NAME)
+    if INT_TO_EXT_PATCH_PORT not in int_intfs:
+        return
+
+    ext_intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
+    if EXT_TO_INT_PATCH_PORT not in ext_intfs:
+        return
+
+    int_to_ext_intf_desc = ovs_ofctl('dump-ports-desc', BRIDGE_NAME)
+    int_to_ext_keyword = '(' + INT_TO_EXT_PATCH_PORT + '): addr:'
+    int_to_ext_mac_address = int_to_ext_intf_desc.split(int_to_ext_keyword, 1)[1][:17]
+
+    ovs_vsctl('set', 'Interface', INT_TO_EXT_PATCH_PORT,
+                     'external-ids:mac_address=%s' % int_to_ext_mac_address)
+
+    ext_to_int_intf_desc = ovs_ofctl('dump-ports-desc', EXT_BRIDGE)
+    ext_to_int_keyword = '(' + EXT_TO_INT_PATCH_PORT + '): addr:'
+    ext_to_int_mac_address = ext_to_int_intf_desc.split(ext_to_int_keyword, 1)[1][:17]
+
+    ovs_vsctl('set', 'Interface', EXT_TO_INT_PATCH_PORT,
+                     'external-ids:mac_address=%s' % ext_to_int_mac_address)
+
 def activate_ex_intf():
     '''
     Activates the external interface.
@@ -568,6 +596,8 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     activate_gw_intf()
 
     activate_ex_intf()
+
+    annotate_patch_ports()
 
     output = json.dumps({'ip_address': ip_address,
                          'gateway_ip': gateway_ip, 'mac_address': mac_address})
