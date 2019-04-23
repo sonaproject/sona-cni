@@ -329,6 +329,40 @@ def get_external_intf():
     except Exception as e:
         raise SonaCniException(102, "failure get external interface " + str(e))
 
+def get_external_gw_ip():
+    '''
+    Obtains the external gateway IP address.
+
+    :return    external gateway IP address
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        if cf.has_option("network", "external_gw_ip") is True:
+            return cf.get("network", "external_gw_ip")
+        else:
+            return None
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get external gateway IP " + str(e))
+
+def get_external_gw_mac():
+    '''
+    Obtains the external gateway MAC address.
+
+    :return    external gateway MAC address
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        if cf.has_option("network", "external_gw_mac") is True:
+            return cf.get("network", "external_gw_mac")
+        else:
+            return None
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get external gateway MAC " + str(e))
+
 def allocate_ip(network_id):
     '''
     Allocates a new IP address.
@@ -370,42 +404,25 @@ def is_interface_up(interface):
     addr = netifaces.ifaddresses(interface)
     return netifaces.AF_INET in addr
 
-def annotate_patch_ports():
-    '''
-    Adds annotations to patch ports.
-    '''
-    int_intfs = ovs_vsctl('list-ifaces', BRIDGE_NAME)
-    if INT_TO_EXT_PATCH_PORT not in int_intfs:
-        return
-
-    ext_intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
-    if EXT_TO_INT_PATCH_PORT not in ext_intfs:
-        return
-
-    int_to_ext_intf_desc = ovs_ofctl('dump-ports-desc', BRIDGE_NAME)
-    int_to_ext_keyword = '(' + INT_TO_EXT_PATCH_PORT + '): addr:'
-    int_to_ext_mac_address = int_to_ext_intf_desc.split(int_to_ext_keyword, 1)[1][:17]
-
-    ovs_vsctl('set', 'Interface', INT_TO_EXT_PATCH_PORT,
-                     'external-ids:mac_address=%s' % int_to_ext_mac_address)
-
-    ext_to_int_intf_desc = ovs_ofctl('dump-ports-desc', EXT_BRIDGE)
-    ext_to_int_keyword = '(' + EXT_TO_INT_PATCH_PORT + '): addr:'
-    ext_to_int_mac_address = ext_to_int_intf_desc.split(ext_to_int_keyword, 1)[1][:17]
-
-    ovs_vsctl('set', 'Interface', EXT_TO_INT_PATCH_PORT,
-                     'external-ids:mac_address=%s' % ext_to_int_mac_address)
-
 def activate_ex_intf():
     '''
     Activates the external interface.
     '''
     ipdb = pyroute2.IPDB(mode='explicit')
     ex_intf = get_external_intf()
-    
+
+    ex_gw_ip = get_external_gw_ip()
+    ex_gw_mac = get_external_gw_mac()
+
     if ex_intf is None:
         return
-    
+
+    if ex_gw_ip is None:
+        return
+
+    if ex_gw_mac is None:
+        return
+
     if is_interface_up(ex_intf) is False:
         return
 
@@ -421,8 +438,11 @@ def activate_ex_intf():
         mac_address = intf_desc.split(keyword, 1)[1][:17]
         ovs_vsctl('set', 'Interface', EXT_BRIDGE,
                          'external-ids:mac_address=%s' % mac_address,
-                         'external-ids:ip_address=%s' % ip_address, 
-                         'external-ids:ext_interface=%s' % ex_intf)
+                         'external-ids:ip_address=%s' % ip_address,
+                         'external-ids:ext_interface=%s' % ex_intf,
+                         'external-ids:ext_gw_ip_address=%s' % ex_gw_ip,
+                         'external-ids:ext_gw_mac_address=%s' % ex_gw_mac)
+
     except Exception as e:
         raise SonaCniException(108, "failure activate external interface " + str(e))
 
@@ -594,10 +614,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         raise SonaCniException(106, "failure in plugging pod interface" + str(e))
 
     activate_gw_intf()
-
     activate_ex_intf()
-
-    annotate_patch_ports()
 
     output = json.dumps({'ip_address': ip_address,
                          'gateway_ip': gateway_ip, 'mac_address': mac_address})
