@@ -1,0 +1,14 @@
+AUTHORS
+build/*
+build-stamp
+ChangeLog
+dist/
+doc/build
+*.DS_Store
+*.pyc
+*~
+/.*
+!/.gitignore
+!/.gitreview
+!/.mailmap
+!/.pylintrc
