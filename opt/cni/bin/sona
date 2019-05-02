@@ -346,23 +346,6 @@ def get_external_gw_ip():
     except Exception as e:
         raise SonaCniException(102, "failure get external gateway IP " + str(e))
 
-def get_external_gw_mac():
-    '''
-    Obtains the external gateway MAC address.
-
-    :return    external gateway MAC address
-    '''
-    try:
-        cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
-        if cf.has_option("network", "external_gw_mac") is True:
-            return cf.get("network", "external_gw_mac")
-        else:
-            return None
-
-    except Exception as e:
-        raise SonaCniException(102, "failure get external gateway MAC " + str(e))
-
 def allocate_ip(network_id):
     '''
     Allocates a new IP address.
@@ -412,15 +395,11 @@ def activate_ex_intf():
     ex_intf = get_external_intf()
 
     ex_gw_ip = get_external_gw_ip()
-    ex_gw_mac = get_external_gw_mac()
 
     if ex_intf is None:
         return
 
     if ex_gw_ip is None:
-        return
-
-    if ex_gw_mac is None:
         return
 
     if is_interface_up(ex_intf) is False:
@@ -440,8 +419,7 @@ def activate_ex_intf():
                          'external-ids:mac_address=%s' % mac_address,
                          'external-ids:ip_address=%s' % ip_address,
                          'external-ids:ext_interface=%s' % ex_intf,
-                         'external-ids:ext_gw_ip_address=%s' % ex_gw_ip,
-                         'external-ids:ext_gw_mac_address=%s' % ex_gw_mac)
+                         'external-ids:ext_gw_ip_address=%s' % ex_gw_ip)
 
     except Exception as e:
         raise SonaCniException(108, "failure activate external interface " + str(e))
