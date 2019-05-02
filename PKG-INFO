@@ -1,7 +1,7 @@
 Metadata-Version: 1.0
 Name: sona-cni
 Version: 2019.05.02
-Summary: OpenStack Networking
+Summary: Kubernetes CNI Plugin
 Home-page: https://wiki.onosproject.org/display/ONOS/SONA%3A+DC+Network+Virtualization
 Author: SONA
 Author-email: gunine@sk.com

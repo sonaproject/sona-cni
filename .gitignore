@@ -6,6 +6,8 @@ dist/
 doc/build
 *.DS_Store
 *.pyc
+sona_cni.egg-info/
+pbr*.egg/
 *~
 /.*
 !/.gitignore
