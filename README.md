@@ -2,7 +2,7 @@
 SONA Container Network Interface (CNI) implements standard CNI APIs, aims to support Kubernetes network using ONOS. The [sona-cni repository](https://github.com/sonaproject/sona-cni) contains code which makes the interaction between ONOS and Kubernetes possible. For more information visit [ONOS](http://onosproject.org/) and [Kubernetes](https://kubernetes.io/) projects.
 
 # Installation
-OS requirements: CentOS 7.5
+Requirements: CentOS 7.5 or above with Kubernetes installed.
 
 1. Install python-pip and git.
 ```
