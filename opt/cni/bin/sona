@@ -26,6 +26,7 @@ import socket
 import struct
 import random
 import netifaces
+import ipaddress
 from netaddr import *
 from random import randint
 
@@ -196,15 +197,18 @@ def create_network():
     net_name = socket.gethostname()
     net_type = cf.get("network", "type")
     segment_id = cf.get("network", "segment_id")
-    gateway_ip = cf.get("network", "gateway_ip")
     cidr = cf.get("network", "cidr")
     mtu = cf.get("network", "mtu")
 
-    data = json.dumps({"networkId": net_id, "name": net_name,
-                       "type": net_type, "segmentId": segment_id,
-                       "gatewayIp": gateway_ip, "cidr": cidr})
+    data = {"networkId": net_id, "name": net_name, "cidr": cidr}
 
-    resp = request("network", "post", data)
+    if net_type is not None:
+        data['type'] = net_type
+
+    if segment_id is not None:
+        data['segmentId'] = segment_id
+
+    resp = request("network", "post", json.dumps(data))
 
 def get_network_id():
     '''
@@ -235,20 +239,6 @@ def get_dpid():
 
     except Exception as e:
         raise SonaCniException(105, "failure get DPID " + str(e))
-
-def get_gw_ip():
-    '''
-    Obtains the gateway IP address.
-
-    :return    gateway IP address
-    '''
-    try:
-        cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
-        return cf.get("network", "gateway_ip")
-
-    except Exception as e:
-        raise SonaCniException(102, "failure get gateway IP " + str(e))
 
 def get_cidr():
     '''
@@ -393,12 +383,12 @@ def activate_ex_intf():
     '''
     ipdb = pyroute2.IPDB(mode='explicit')
     ex_intf = get_external_intf()
-
+    
     ex_gw_ip = get_external_gw_ip()
-
+ 
     if ex_intf is None:
         return
-
+ 
     if ex_gw_ip is None:
         return
 
@@ -416,9 +406,8 @@ def activate_ex_intf():
         keyword = '(' + ex_intf + '): addr:'
         mac_address = intf_desc.split(keyword, 1)[1][:17]
         ovs_vsctl('set', 'Interface', EXT_BRIDGE,
-                         'external-ids:mac_address=%s' % mac_address,
-                         'external-ids:ip_address=%s' % ip_address,
-                         'external-ids:ext_interface=%s' % ex_intf,
+                         'external-ids:ip_address=%s' % ip_address, 
+                         'external-ids:ext_interface=%s' % ex_intf, 
                          'external-ids:ext_gw_ip_address=%s' % ex_gw_ip)
 
     except Exception as e:
@@ -429,8 +418,9 @@ def activate_gw_intf():
     Activates the host default gateway interface.
     '''
     ipdb = pyroute2.IPDB(mode='explicit')
-    gw_ip = get_gw_ip()
     cidr = get_cidr()
+    network = ipaddress.ip_network(cidr.decode('unicode_escape'))
+    gw_ip = str(network[1])
     global_cidr = get_global_cidr()
     transient_cidr = get_transient_cidr()
     service_cidr = get_service_cidr()
@@ -440,11 +430,6 @@ def activate_gw_intf():
             if bridge_iface.operstate != "up":
                 bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
                 bridge_iface.up()
-                iface_desc = ovs_ofctl('dump-ports-desc', BRIDGE_NAME)
-                keyword = '(' + BRIDGE_NAME + '): addr:'
-                mac_address = iface_desc.split(keyword, 1)[1][:17]
-                ovs_vsctl('set', 'Interface', BRIDGE_NAME,
-                          'external-ids:mac_address=%s' % mac_address)
 
         local_found = False
         global_found = False
@@ -487,7 +472,6 @@ def setup_interface(container_id, cni_netns, cni_ifname,
             cni_ifname:     CNI interface name
             mac_address:    MAC address
             ip_address:     IP address with CIDR attached (e.g., 10.10.10.2/24)
-            gateway_ip:     gateway IP address
 
     '''
     try:
@@ -570,9 +554,10 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     if has_network() is False:
         create_network()
     ip_address = allocate_ip(get_network_id())
-    gateway_ip = get_gw_ip()
     local_cidr = get_cidr()
     ip_address = ip_address + '/' + local_cidr.split('/')[1]
+    network = ipaddress.ip_network(local_cidr.decode('unicode_escape'))
+    gateway_ip = str(network[1])
     mac_address = randomMAC()
 
     veth_outside = setup_interface(container_id, cni_netns, cni_ifname,
@@ -592,6 +577,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         raise SonaCniException(106, "failure in plugging pod interface" + str(e))
 
     activate_gw_intf()
+
     activate_ex_intf()
 
     output = json.dumps({'ip_address': ip_address,
