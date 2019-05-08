@@ -35,10 +35,6 @@ SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
 BRIDGE_NAME = "kbr-int"
 EXT_BRIDGE = "kbr-ex"
 
-EXTERNAL_GW_IP = "external.gateway.ip"
-EXTERNAL_INTF_NAME = "external.interface.name"
-EXTERNAL_BR_IP = "external.bridge.ip"
-
 DEFAULT_TRANSIENT_CIDR = "172.10.0.0/16"
 DEFAULT_SERVICE_CIDR = "10.96.0.0/12"
 
@@ -112,13 +108,26 @@ def get_cidr():
 
     :return     network CIDR
     '''
-    try:
-        cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
-        return cf.get("network", "cidr");
+    node_name = socket.gethostname()
+    config.load_kube_config()
+    v1 = client.CoreV1Api()
+    node = v1.read_node(name=node_name)
+    if node is not None:
+        return node.spec.pod_cidr
+    else:
+        return None
 
-    except Exception as e:
-        raise SonaException(102, "failure get CIDR " + str(e))
+def get_gateway_ip():
+    '''
+    Obtains the overlay gateway IP address.
+    
+    :return     gateway IP address
+    '''
+    cidr = get_cidr()
+
+    if cidr is not None:
+        network = ipaddress.ip_network(cidr.decode('unicode_escape'))
+        return  str(network[1])
 
 def get_global_cidr():
     '''
@@ -126,13 +135,12 @@ def get_global_cidr():
 
     :return     network global CIDR
     '''
-    try:
-        cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
-        return cf.get("network", "global_cidr");
+    cidr = get_cidr()
 
-    except Exception as e:
-        raise SonaException(102, "failure get global CIDR " + str(e))
+    if cidr is not None:
+        network = ipaddress.ip_network(cidr.decode('unicode_escape'))
+        super_net = network.supernet(new_prefix=16)
+        return str(super_net)
 
 def get_transient_cidr():
     '''
@@ -258,16 +266,19 @@ def activate_gw_intf():
     '''
     ipdb = pyroute2.IPDB(mode='explicit')
     cidr = get_cidr()
-    network = ipaddress.ip_network(cidr.decode('unicode_escape'))
-    gw_ip = str(network[1])
+    gw_ip = get_gateway_ip()
     global_cidr = get_global_cidr()
     transient_cidr = get_transient_cidr()
     service_cidr = get_service_cidr()
 
     try:
         with ipdb.interfaces[BRIDGE_NAME] as bridge_iface:
-            if bridge_iface.operstate != "up":
-                bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
+            for addr in bridge_iface.ipaddr:
+                addr_str = '/'.join(map(str, addr))
+                bridge_iface.del_ip(addr_str)
+
+            bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
+            if bridge_iface.operstate == "DOWN":
                 bridge_iface.up()
 
         local_found = False
@@ -295,36 +306,11 @@ def activate_gw_intf():
 
         if not service_found:
             ipdb.routes.add(dst=service_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
-
     except Exception as e:
         raise SonaException(108, "failure activate gateway interface " + str(e))
 
-def addAnnotationToNode(api_instance, node_name, annot_key, annot_value):
-    node = api_instance.read_node(name=node_name)
-    node.metadata.annotations[annot_key] = annot_value
-    return api_instance.patch_node(name=node_name, body=node)
-
 def main():
-
-    ex_gw_ip = get_external_gateway_ip()
-    ex_br_ip = get_external_bridge_ip()
-    ex_gw_intf = get_external_interface()
-    hostname = socket.gethostname()
-
-    # Configs can be set in Configuration class directly or using helper utility
-    config.load_kube_config()
-
-    v1 = client.CoreV1Api()
- 
-    if hostname is not None:
-        # add external gateway IP address
-        addAnnotationToNode(v1, hostname, EXTERNAL_GW_IP, ex_gw_ip)
-
-        # add external interface name
-        addAnnotationToNode(v1, hostname, EXTERNAL_INTF_NAME, ex_gw_intf)
-
-        # add external bridge IP
-        addAnnotationToNode(v1, hostname, EXTERNAL_BR_IP, ex_br_ip)
+    activate_gw_intf()
 
 class SonaException(Exception):
 
