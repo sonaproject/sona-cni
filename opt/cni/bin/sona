@@ -445,7 +445,7 @@ def activate_gw_intf():
         raise SonaCniException(108, "failure activate gateway interface " + str(e))
 
 def setup_interface(container_id, cni_netns, cni_ifname,
-                    mac_address, ip_address, gateway_ip):
+                    mac_address, ip_address):
     '''
     Sets up the host interface and container interface.
     Note that host interface is referred as outside-interface, while
@@ -541,12 +541,10 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     ip_address = allocate_ip(get_network_id())
     local_cidr = get_cidr()
     ip_address = ip_address + '/' + local_cidr.split('/')[1]
-    network = ipaddress.ip_network(local_cidr.decode('unicode_escape'))
-    gateway_ip = str(network[1])
     mac_address = randomMAC()
 
     veth_outside = setup_interface(container_id, cni_netns, cni_ifname,
-                                   mac_address, ip_address, gateway_ip)
+                                   mac_address, ip_address)
 
     iface_id = "%s_%s" % (namespace, pod_name)
 
@@ -562,11 +560,9 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         raise SonaCniException(106, "failure in plugging pod interface" + str(e))
 
     activate_gw_intf()
-
     activate_ex_intf()
 
-    output = json.dumps({'ip_address': ip_address,
-                         'gateway_ip': gateway_ip, 'mac_address': mac_address})
+    output = json.dumps({'ip_address': ip_address, 'mac_address': mac_address})
     print(output)
 
 def cni_del(container_id, cni_ifname):
