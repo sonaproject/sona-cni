@@ -73,6 +73,7 @@ def ovs_vsctl(*args):
     :param    args:     arguments pointer
     :return    executed result of ovs-vsctl
     '''
+    print list(args)
     return call_prog("ovs-vsctl", list(args))
 
 def ovs_ofctl(*args):
@@ -225,6 +226,16 @@ def is_interface_up(interface):
     addr = netifaces.ifaddresses(interface)
     return netifaces.AF_INET in addr
 
+def has_interface(interface):
+    '''
+    Checks whether the machine has the given network interface.
+    '''
+    detail = netifaces.ifaddresses(interface)
+    if detail is None:
+        return False
+    else:
+        return True
+
 def activate_ex_intf():
     '''
     Activates the external interface.
@@ -232,30 +243,46 @@ def activate_ex_intf():
     ipdb = pyroute2.IPDB(mode='explicit')
     ex_intf = get_external_interface() 
     ex_gw_ip = get_external_gateway_ip()
- 
+
     if ex_intf is None:
         return
  
     if ex_gw_ip is None:
         return
 
-    if is_interface_up(ex_intf) is False:
-        return
-
-    intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
-    if ex_intf in intfs:
+    if has_interface(ex_intf) is False:
         return
 
     try:
-        ovs_vsctl('add-port', EXT_BRIDGE, ex_intf)
-        ip_address = netifaces.ifaddresses(ex_intf)[netifaces.AF_INET][0]['addr']
-        intf_desc = ovs_ofctl('dump-ports-desc', EXT_BRIDGE)
-        keyword = '(' + ex_intf + '): addr:'
-        mac_address = intf_desc.split(keyword, 1)[1][:17]
-        ovs_vsctl('set', 'Interface', EXT_BRIDGE,
-                         'external-ids:ip_address=%s' % ip_address, 
-                         'external-ids:ext_interface=%s' % ex_intf, 
-                         'external-ids:ext_gw_ip_address=%s' % ex_gw_ip)
+        ext_ip_address = "127.0.0.1/24"
+        ext_mac_address = "02:11:22:33:44:55"
+        empty_ip_address = "0.0.0.0"
+        with ipdb.interfaces[ex_intf] as ext_iface:
+            ipv4_addr = ext_iface.ipaddr.ipv4
+            if not ipv4_addr:
+                print "External interface does not have any IP address"
+                return
+            ext_ip_address = ipv4_addr[0]["address"] + '/' + str(ipv4_addr[0]["prefixlen"])
+            ext_mac_address = ext_iface.address
+            for addr in ext_iface.ipaddr:
+                addr_str = '/'.join(map(str, addr))
+                ext_iface.del_ip(addr_str)
+
+        with ipdb.interfaces[EXT_BRIDGE] as ext_bridge_iface:
+            for addr in ext_bridge_iface.ipaddr:
+                addr_str = '/'.join(map(str, addr))
+                ext_bridge_iface.del_ip(addr_str)
+
+            ext_bridge_iface.add_ip(ext_ip_address)
+            addr_config_str = 'other-config:hwaddr=\"' + ext_mac_address + '\"'
+            if ext_bridge_iface.operstate == "DOWN":
+                ext_bridge_iface.up()
+
+            ovs_vsctl('set', 'bridge', EXT_BRIDGE, addr_config_str)       
+ 
+        intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
+        if ex_intf not in intfs:
+            ovs_vsctl('add-port', EXT_BRIDGE, ex_intf)
 
     except Exception as e:
         raise SonaException(108, "failure activate external interface " + str(e))
@@ -311,6 +338,7 @@ def activate_gw_intf():
 
 def main():
     activate_gw_intf()
+    activate_ex_intf()
 
 class SonaException(Exception):
 
