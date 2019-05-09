@@ -29,6 +29,7 @@ import netifaces
 import ipaddress
 from netaddr import *
 from random import randint
+from kubernetes import client, config
 
 CNI_VERSION = "0.3.1"
 INSIDE_MTU = 1400
@@ -240,19 +241,32 @@ def get_dpid():
     except Exception as e:
         raise SonaCniException(105, "failure get DPID " + str(e))
 
+def get_gateway_ip():
+    '''
+    Obtains the overlay gateway IP address.
+    
+    :return     gateway IP address
+    '''
+    cidr = get_cidr()
+
+    if cidr is not None:
+        network = ipaddress.ip_network(cidr.decode('unicode_escape'))
+        return  str(network[1])
+
 def get_cidr():
     '''
     Obtains the network CIDR.
 
     :return     network CIDR
     '''
-    try:
-        cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
-        return cf.get("network", "cidr");
-
-    except Exception as e:
-        raise SonaCniException(102, "failure get CIDR " + str(e))
+    node_name = socket.gethostname()
+    config.load_kube_config()
+    v1 = client.CoreV1Api()
+    node = v1.read_node(name=node_name)
+    if node is not None:
+        return node.spec.pod_cidr
+    else:
+        return None
 
 def get_global_cidr():
     '''
@@ -260,13 +274,12 @@ def get_global_cidr():
 
     :return     network global CIDR
     '''
-    try:
-        cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
-        return cf.get("network", "global_cidr");
+    cidr = get_cidr()
 
-    except Exception as e:
-        raise SonaCniException(102, "failure get global CIDR " + str(e))
+    if cidr is not None:
+        network = ipaddress.ip_network(cidr.decode('unicode_escape'))
+        super_net = network.supernet(new_prefix=16)
+        return str(super_net)
 
 def get_transient_cidr():
     '''
@@ -418,8 +431,7 @@ def activate_gw_intf():
     '''
     ipdb = pyroute2.IPDB(mode='explicit')
     cidr = get_cidr()
-    network = ipaddress.ip_network(cidr.decode('unicode_escape'))
-    gw_ip = str(network[1])
+    gw_ip = get_gateway_ip()
     global_cidr = get_global_cidr()
     transient_cidr = get_transient_cidr()
     service_cidr = get_service_cidr()
