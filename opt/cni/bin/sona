@@ -184,33 +184,6 @@ def has_network():
         result = resp.json()
         return result["result"]
 
-def create_network():
-    '''
-    Creates a new container network.
-
-    :return    REST response
-    '''
-
-    cf = ConfigParser.ConfigParser()
-    cf.read(SONA_CONFIG_FILE)
-
-    net_id = socket.gethostname()
-    net_name = socket.gethostname()
-    net_type = cf.get("network", "type")
-    segment_id = cf.get("network", "segment_id")
-    cidr = cf.get("network", "cidr")
-    mtu = cf.get("network", "mtu")
-
-    data = {"networkId": net_id, "name": net_name, "cidr": cidr}
-
-    if net_type is not None:
-        data['type'] = net_type
-
-    if segment_id is not None:
-        data['segmentId'] = segment_id
-
-    resp = request("network", "post", json.dumps(data))
-
 def get_network_id():
     '''
     Obtains the network identifier.
@@ -563,7 +536,8 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
 
     '''
     if has_network() is False:
-        create_network()
+        return
+
     ip_address = allocate_ip(get_network_id())
     local_cidr = get_cidr()
     ip_address = ip_address + '/' + local_cidr.split('/')[1]
@@ -604,7 +578,7 @@ def cni_del(container_id, cni_ifname):
 
     '''
     if has_network() is False:
-        create_network()
+        return
 
     veth_outside = VETH_PREFIX + container_id[:11]
     ports = ovs_vsctl("list-ports", BRIDGE_NAME)
