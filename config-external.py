@@ -55,7 +55,8 @@ def get_external_bridge_ip():
     
     :return	external IP address
     '''
-    return netifaces.ifaddresses(EXT_BRIDGE)[netifaces.AF_INET][0]['addr']
+    ext_interface = get_external_interface()
+    return netifaces.ifaddresses(ext_interface)[netifaces.AF_INET][0]['addr']
 
 def get_external_gateway_ip():
     '''
