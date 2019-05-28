@@ -411,8 +411,12 @@ def activate_gw_intf():
 
     try:
         with ipdb.interfaces[BRIDGE_NAME] as bridge_iface:
-            if bridge_iface.operstate != "up":
-                bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
+            for addr in bridge_iface.ipaddr:
+                addr_str = '/'.join(map(str, addr))
+                bridge_iface.del_ip(addr_str)
+
+            bridge_iface.add_ip(gw_ip + '/' + cidr.split('/')[1])
+            if bridge_iface.operstate == "DOWN":
                 bridge_iface.up()
 
         local_found = False
