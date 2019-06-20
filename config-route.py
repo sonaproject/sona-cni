@@ -337,7 +337,7 @@ def activate_gw_intf():
         raise SonaException(108, "failure activate gateway interface " + str(e))
 
 def main():
-    # activate_gw_intf()
+    activate_gw_intf()
     activate_ex_intf()
 
 class SonaException(Exception):
