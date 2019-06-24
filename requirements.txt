@@ -10,3 +10,4 @@ requests>=2.6.0 # Apache-2.0
 netifaces>=0.10.9 # MIT
 ipaddress>=1.0.16 # Python
 kubernetes>=9.0.0 # Apache-2.0
+urllib3==1.24.3 # MIT
