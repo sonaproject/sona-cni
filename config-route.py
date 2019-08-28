@@ -34,9 +34,12 @@ from kubernetes import client, config
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
 BRIDGE_NAME = "kbr-int"
 EXT_BRIDGE = "kbr-ex"
+LOCAL_BRIDGE = "kbr-local"
 
 DEFAULT_TRANSIENT_CIDR = "172.10.0.0/16"
+DEFAULT_TRANSIENT_LOCAL_CIDR = "172.11.0.0/16"
 DEFAULT_SERVICE_CIDR = "10.96.0.0/12"
+DEFAULT_FAKE_MAC = "fe:00:00:00:00:20"
 
 def call_popen(cmd):
     '''
@@ -159,6 +162,23 @@ def get_transient_cidr():
 
     except Exception as e:
         raise SonaException(102, "failure get transient CIDR " + str(e))
+
+def get_transient_local_cidr():
+    '''
+    Obtains the transient local network CIDR.
+
+    :return     transient local network CIDR
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        if cf.has_option("network", "transient_local_cidr") is True:
+            return cf.get("network", "transient_local_cidr")
+        else:
+            return DEFAULT_TRANSIENT_LOCAL_CIDR
+
+    except Exception as e:
+        raise SonaException(102, "failure get transient local CIDR " + str(e))
 
 def get_service_cidr():
     '''
@@ -296,6 +316,7 @@ def activate_gw_intf():
     gw_ip = get_gateway_ip()
     global_cidr = get_global_cidr()
     transient_cidr = get_transient_cidr()
+    transient_local_cidr = get_transient_local_cidr()
     service_cidr = get_service_cidr()
 
     try:
@@ -308,10 +329,19 @@ def activate_gw_intf():
             if bridge_iface.operstate == "DOWN":
                 bridge_iface.up()
 
+	with ipdb.interfaces[LOCAL_BRIDGE] as bridge_iface:
+            if bridge_iface.operstate == "DOWN":
+                bridge_iface.up()
+
+            addr_config_str = 'other-config:hwaddr=\"' + DEFAULT_FAKE_MAC + '\"'
+            ovs_vsctl('set', 'bridge', LOCAL_BRIDGE, addr_config_str)
+
         local_found = False
         global_found = False
         transient_found = False
         service_found = False
+	transient_local_found = False
+
         for route in ipdb.routes:
             if route['dst'] == cidr:
                 local_found = True
@@ -321,6 +351,8 @@ def activate_gw_intf():
                 transient_found = True
             if route['dst'] == service_cidr:
                 service_found = True
+            if route['dst'] == transient_local_cidr:
+                transient_local_found = True
 
         if not local_found:
             ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
@@ -333,6 +365,10 @@ def activate_gw_intf():
 
         if not service_found:
             ipdb.routes.add(dst=service_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+
+	if not transient_local_found:
+            ipdb.routes.add(dst=transient_local_cidr, oif=ipdb.interfaces[LOCAL_BRIDGE].index).commit()
+
     except Exception as e:
         raise SonaException(108, "failure activate gateway interface " + str(e))
 
