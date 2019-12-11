@@ -32,6 +32,7 @@ from random import randint
 from kubernetes import client, config
 
 CNI_VERSION = "0.3.1"
+SUPPORTED_VERSIONS = [ "0.1.0", "0.2.0", "0.3.0", "0.3.1" ]
 INSIDE_MTU = 1400
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
@@ -603,24 +604,33 @@ def cni_del(container_id, cni_ifname):
     command = "rm -f /var/run/netns/%s" % container_id
     call_popen(shlex.split(command))
 
+def cni_version():
+    json_data = {'cniVersion': CNI_VERSION,
+                 'supportedVersions': SUPPORTED_VERSIONS}
+    print(json.dumps(json_data))
+
 def main():
     try:
         cni_command = os.environ['CNI_COMMAND']
-        cni_ifname = os.environ['CNI_IFNAME']
-        cni_netns = os.environ['CNI_NETNS']
-        cni_args = os.environ['CNI_ARGS']
 
-        cni_args_dict = dict(i.split("=") for i in cni_args.split(";"))
-        namespace = cni_args_dict['K8S_POD_NAMESPACE']
-        pod_name = cni_args_dict['K8S_POD_NAME']
-        container_id = cni_args_dict['K8S_POD_INFRA_CONTAINER_ID']
+        if cni_command == "VERSION":
+            cni_version()
+        else:
+            cni_ifname = os.environ['CNI_IFNAME']
+            cni_netns = os.environ['CNI_NETNS']
+            cni_args = os.environ['CNI_ARGS']
+            cni_args_dict = dict(i.split("=") for i in cni_args.split(";"))
+            namespace = cni_args_dict['K8S_POD_NAMESPACE']
+            pod_name = cni_args_dict['K8S_POD_NAME']
+            container_id = cni_args_dict['K8S_POD_INFRA_CONTAINER_ID']
+
+            if cni_command == "ADD":
+                cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id)
+            elif cni_command == "DEL":
+                cni_del(container_id, cni_ifname)
+
     except Exception as e:
         raise SonaCniException(100, 'required CNI variables missing', str(e))
-
-    if cni_command == "ADD":
-        cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id)
-    elif cni_command == "DEL":
-        cni_del(container_id, cni_ifname)
 
 class SonaCniException(Exception):
 
