@@ -6,6 +6,7 @@ dist/
 doc/build
 *.DS_Store
 *.pyc
+*.spec
 sona_cni.egg-info/
 pbr*.egg/
 *~
