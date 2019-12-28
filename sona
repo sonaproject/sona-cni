@@ -35,6 +35,11 @@ CNI_VERSION = "0.3.1"
 SUPPORTED_VERSIONS = [ "0.1.0", "0.2.0", "0.3.0", "0.3.1" ]
 INSIDE_MTU = 1400
 
+ONOS_USERNAME = "onos"
+ONOS_PASSWORD = "rocks"
+ONOS_PORT_NUM = "8181"
+ONOS_K8S_PATH = "onos/k8snetworking"
+
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
 BRIDGE_NAME = "kbr-int"
 EXT_BRIDGE = "kbr-ex"
@@ -93,6 +98,41 @@ def ovs_ofctl(*args):
     '''
     return call_prog("ovs-ofctl", list(args))
 
+def master_ip():
+    '''
+    A helper method to retrieve Kubernetes master IP address.
+
+    :return    Kubernetes master IP address
+    '''
+    config.load_kube_config()
+
+    api_instance = client.CoreV1Api()
+
+    master_str = "node-role.kubernetes.io/master"
+
+    node_list = api_instance.list_node()
+
+    for node in node_list.items:
+        node_labels = node.metadata.labels
+        for labels in node_labels:
+            # TODO: need to check whether the given master node has SONA POD
+            if master_str in labels:
+                return get_node_address(node)
+    return None
+
+def get_node_address(node):
+    '''
+    A helper method to retrieve Kubernetes IP address from the given node.
+
+    :param    node: kubernetes node
+    :return   Kubernetes node's IP address
+    '''
+    node_status = node.status
+    for address in node_status.addresses:
+        if address.type == "InternalIP":
+            return address.address
+    return None
+
 def request(endpoint, method, data):
     '''
     A helper method to issue REST API call.
@@ -102,23 +142,13 @@ def request(endpoint, method, data):
                 data:       REST data
     :return    REST response
     '''
-    cf = ConfigParser.ConfigParser()
-    cf.read(SONA_CONFIG_FILE)
-
-    url = cf.get("onos", "url_path")
-    username = cf.get("onos", "username")
-    password = cf.get("onos", "password")
-
-    if url is None:
-        url = 'http://localhost:8181/onos/k8snetworking'
-
-    if username is None:
-        username = 'onos'
-
-    if password is None:
-        password = 'rocks'
-
+    
+    master_ip = master_ip()
+    url = "http://" + master_ip + ":" + ONOS_PORT_NUM + "/" + ONOS_K8S_PATH
     url = url + "/" + endpoint
+
+    username = ONOS_USERNAME
+    password = ONOS_PASSWORD
 
     headers = {}
     headers['Content-Type'] = 'application/json'
@@ -605,6 +635,9 @@ def cni_del(container_id, cni_ifname):
     call_popen(shlex.split(command))
 
 def cni_version():
+    '''
+    Prints CNI strings along with version when receiving CNI version command.
+    '''
     json_data = {'cniVersion': CNI_VERSION,
                  'supportedVersions': SUPPORTED_VERSIONS}
     print(json.dumps(json_data))
