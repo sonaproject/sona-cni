@@ -26,7 +26,7 @@ import netifaces
 from netaddr import *
 from kubernetes import client, config
 
-SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
+SONA_CONFIG_FILE = "/host/etc/sona/sona-cni.conf"
 
 EXTERNAL_GW_IP = "external.gateway.ip"
 EXTERNAL_INTF_NAME = "external.interface.name"
