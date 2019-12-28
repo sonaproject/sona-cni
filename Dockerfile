@@ -18,7 +18,7 @@ RUN apt-get -y update && apt-get install -y build-essential upx-ucl tk
 
 ADD requirements.txt /
 ADD sona /
-ADD config-external.py /
+ADD config-external-for-pod.py /
 
 RUN pip install -r /requirements.txt && \
     pip install pyinstaller
