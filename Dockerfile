@@ -24,12 +24,12 @@ RUN pip install -r /requirements.txt && \
     pip install pyinstaller
 
 RUN pyinstaller --onefile sona
-RUN pyinstaller --onefile config-external.py
+RUN pyinstaller --onefile config-external-for-pod.py
 
 FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
 
 COPY --from=builder /dist/sona /
-COPY --from=builder /dist/config-external /
+COPY --from=builder /dist/config-external-for-pod /
 
 LABEL name="SONA CNI" \
       vendor="SK Telecom" \
