@@ -12,7 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+FROM python:2-slim as builder
+
+RUN apt-get -y update && apt-get install -y build-essential upx-ucl tk
+
+ADD requirements.txt /
+ADD sona /
+ADD config-external.py /
+
+RUN pip install -r /requirements.txt && \
+    pip install pyinstaller
+
+RUN pyinstaller --onefile sona
+RUN pyinstaller --onefile config-external.py
+
 FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
+
+COPY --from=builder /dist/sona /
+COPY --from=builder /dist/config-external /
 
 LABEL name="SONA CNI" \
       vendor="SK Telecom" \
@@ -21,13 +38,7 @@ LABEL name="SONA CNI" \
       description="SONA CNI includes a CNI networking plugin and a set of configuration scripts" \
       maintainer="gunine@sk.com"
 
-ADD /dist/sona /opt/cni/bin/
-ADD /dist/config-route /config-route
-ADD /dist/config-external /config-external
-
 RUN mkdir /licenses
 COPY LICENSE /licenses
 
-ENV PATH=$PATH:/opt/cni/bin
-WORKDIR /opt/cni/bin
-CMD ["/opt/cni/bin/sona"]
+ENTRYPOINT ["/sona"]
