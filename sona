@@ -142,9 +142,7 @@ def request(endpoint, method, data):
                 data:       REST data
     :return    REST response
     '''
-    
-    master_ip = master_ip()
-    url = "http://" + master_ip + ":" + ONOS_PORT_NUM + "/" + ONOS_K8S_PATH
+    url = "http://" + master_ip() + ":" + ONOS_PORT_NUM + "/" + ONOS_K8S_PATH
     url = url + "/" + endpoint
 
     username = ONOS_USERNAME
