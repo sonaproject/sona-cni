@@ -27,7 +27,7 @@ from netaddr import *
 from kubernetes import client, config
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
-
+SONA_CONFIG_FILE_ENV = os.environ['SONA_CONFIG_FILE_PATH']
 EXTERNAL_GW_IP = "external.gateway.ip"
 EXTERNAL_INTF_NAME = "external.interface.name"
 EXTERNAL_BR_IP = "external.bridge.ip"
@@ -39,8 +39,12 @@ def get_external_interface():
     :return     external interface name
     '''
     try:
+        sona_config_file = SONA_CONFIG_FILE
+        if SONA_CONFIG_FILE_ENV is not None:
+            sona_config_file = SONA_CONFIG_FILE_ENV
+
         cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
+        cf.read(sona_config_file)
         if cf.has_option("network", "external_interface") is True:
             return cf.get("network", "external_interface")
         else:
@@ -65,8 +69,12 @@ def get_external_gateway_ip():
     :return    external gateway IP address
     '''
     try:
+        sona_config_file = SONA_CONFIG_FILE
+        if SONA_CONFIG_FILE_ENV is not None:
+            sona_config_file = SONA_CONFIG_FILE_ENV
+
         cf = ConfigParser.ConfigParser()
-        cf.read(SONA_CONFIG_FILE)
+        cf.read(sona_config_file)
         if cf.has_option("network", "external_gateway_ip") is True:
             return cf.get("network", "external_gateway_ip")
         else:

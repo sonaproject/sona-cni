@@ -18,18 +18,21 @@ RUN apt-get -y update && apt-get install -y build-essential upx-ucl tk
 
 ADD requirements.txt /
 ADD sona /
-ADD config-external-for-pod.py /
+ADD config-external.py /
 
 RUN pip install -r /requirements.txt && \
     pip install pyinstaller
 
 RUN pyinstaller --onefile sona
-RUN pyinstaller --onefile config-external-for-pod.py
+RUN pyinstaller --onefile config-external.py
 
-FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
+FROM python:2-slim
 
 COPY --from=builder /dist/sona /
-COPY --from=builder /dist/config-external-for-pod /
+COPY --from=builder /dist/config-external /
+
+ADD install-config.sh /
+ADD install-cni.sh /
 
 LABEL name="SONA CNI" \
       vendor="SK Telecom" \
