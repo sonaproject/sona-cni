@@ -32,7 +32,7 @@ from random import randint
 from kubernetes import client, config
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
-BRIDGE_NAME = "kbr-int"
+INT_BRIDGE = "kbr-int"
 EXT_BRIDGE = "kbr-ex"
 LOCAL_BRIDGE = "kbr-local"
 
@@ -95,7 +95,7 @@ def get_dpid():
     :return    data plane identifier
     '''
     try:
-        of_result = ovs_ofctl('show', BRIDGE_NAME)
+        of_result = ovs_ofctl('show', INT_BRIDGE)
 
         if "dpid:" in of_result:
             first_line = of_result.splitlines()[0]
@@ -124,7 +124,7 @@ def get_cidr():
 def get_gateway_ip():
     '''
     Obtains the overlay gateway IP address.
-    
+
     :return     gateway IP address
     '''
     cidr = get_cidr()
@@ -217,7 +217,7 @@ def get_external_interface():
 def get_external_bridge_ip():
     '''
     Obtains the external IP address.
-    
+
     :return	external IP address
     '''
     return netifaces.ifaddresses(EXT_BRIDGE)[netifaces.AF_INET][0]['addr']
@@ -261,12 +261,12 @@ def activate_ex_intf():
     Activates the external interface.
     '''
     ipdb = pyroute2.IPDB(mode='explicit')
-    ex_intf = get_external_interface() 
+    ex_intf = get_external_interface()
     ex_gw_ip = get_external_gateway_ip()
 
     if ex_intf is None:
         return
- 
+
     if ex_gw_ip is None:
         return
 
@@ -298,8 +298,8 @@ def activate_ex_intf():
             if ext_bridge_iface.operstate == "DOWN":
                 ext_bridge_iface.up()
 
-            ovs_vsctl('set', 'bridge', EXT_BRIDGE, addr_config_str)       
- 
+            ovs_vsctl('set', 'bridge', EXT_BRIDGE, addr_config_str)
+
         intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
         if ex_intf not in intfs:
             ovs_vsctl('add-port', EXT_BRIDGE, ex_intf)
@@ -320,7 +320,7 @@ def activate_gw_intf():
     service_cidr = get_service_cidr()
 
     try:
-        with ipdb.interfaces[BRIDGE_NAME] as bridge_iface:
+        with ipdb.interfaces[INT_BRIDGE] as bridge_iface:
             for addr in bridge_iface.ipaddr:
                 addr_str = '/'.join(map(str, addr))
                 bridge_iface.del_ip(addr_str)
@@ -355,16 +355,16 @@ def activate_gw_intf():
                 transient_local_found = True
 
         if not local_found:
-            ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
 
         if not global_found:
-            ipdb.routes.add(dst=global_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=global_cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
 
         if not transient_found:
-            ipdb.routes.add(dst=transient_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=transient_cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
 
         if not service_found:
-            ipdb.routes.add(dst=service_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=service_cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
 
 	if not transient_local_found:
             ipdb.routes.add(dst=transient_local_cidr, oif=ipdb.interfaces[LOCAL_BRIDGE].index).commit()

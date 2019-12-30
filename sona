@@ -41,8 +41,10 @@ ONOS_PORT_NUM = "8181"
 ONOS_K8S_PATH = "onos/k8snetworking"
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
-BRIDGE_NAME = "kbr-int"
+INT_BRIDGE = "kbr-int"
 EXT_BRIDGE = "kbr-ex"
+LOCAL_BRIDGE = "kbr-local"
+
 INT_TO_EXT_PATCH_PORT = "kbr-int-ex"
 EXT_TO_INT_PATCH_PORT = "phy-kbr-ex"
 
@@ -50,7 +52,9 @@ VETH_PREFIX = "veth"
 ETH_PREFIX = "eth"
 
 DEFAULT_TRANSIENT_CIDR = "172.10.0.0/16"
+DEFAULT_TRANSIENT_LOCAL_CIDR = "172.11.0.0/16"
 DEFAULT_SERVICE_CIDR = "10.96.0.0/12"
+DEFAULT_FAKE_MAC = "fe:00:00:00:00:20"
 
 def call_popen(cmd):
     '''
@@ -232,7 +236,7 @@ def get_dpid():
     :return    data plane identifier
     '''
     try:
-        of_result = ovs_ofctl('show', BRIDGE_NAME)
+        of_result = ovs_ofctl('show', INT_BRIDGE)
 
         if "dpid:" in of_result:
             first_line = of_result.splitlines()[0]
@@ -246,7 +250,7 @@ def get_dpid():
 def get_gateway_ip():
     '''
     Obtains the overlay gateway IP address.
-    
+
     :return     gateway IP address
     '''
     cidr = get_cidr()
@@ -300,6 +304,22 @@ def get_transient_cidr():
     except Exception as e:
         raise SonaCniException(102, "failure get transient CIDR " + str(e))
 
+def get_transient_local_cidr():
+    '''
+    Obtains the transient local network CIDR.
+    :return     transient local network CIDR
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        if cf.has_option("network", "transient_local_cidr") is True:
+            return cf.get("network", "transient_local_cidr")
+        else:
+            return DEFAULT_TRANSIENT_LOCAL_CIDR
+
+    except Exception as e:
+        raise SonaException(102, "failure get transient local CIDR " + str(e))
+
 def get_service_cidr():
     '''
     Obtains the service network CIDR.
@@ -333,6 +353,14 @@ def get_external_interface():
 
     except Exception as e:
         raise SonaCniException(102, "failure get external interface " + str(e))
+
+def get_external_bridge_ip():
+    '''
+    Obtains the external IP address.
+
+    :return	external IP address
+    '''
+    return netifaces.ifaddresses(EXT_BRIDGE)[netifaces.AF_INET][0]['addr']
 
 def get_external_gateway_ip():
     '''
@@ -392,6 +420,16 @@ def is_interface_up(interface):
     addr = netifaces.ifaddresses(interface)
     return netifaces.AF_INET in addr
 
+def has_interface(interface):
+    '''
+    Checks whether the machine has the given network interface.
+    '''
+    detail = netifaces.ifaddresses(interface)
+    if detail is None:
+        return False
+    else:
+        return True
+
 def activate_ex_intf():
     '''
     Activates the external interface.
@@ -399,33 +437,49 @@ def activate_ex_intf():
     ipdb = pyroute2.IPDB(mode='explicit')
     ex_intf = get_external_interface()
     ex_gw_ip = get_external_gateway_ip()
- 
+
     if ex_intf is None:
         return
- 
+
     if ex_gw_ip is None:
         return
 
-    if is_interface_up(ex_intf) is False:
-        return
-
-    intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
-    if ex_intf in intfs:
+    if has_interface(ex_intf) is False:
         return
 
     try:
-        ovs_vsctl('add-port', EXT_BRIDGE, ex_intf)
-        ip_address = netifaces.ifaddresses(ex_intf)[netifaces.AF_INET][0]['addr']
-        intf_desc = ovs_ofctl('dump-ports-desc', EXT_BRIDGE)
-        keyword = '(' + ex_intf + '): addr:'
-        mac_address = intf_desc.split(keyword, 1)[1][:17]
-        ovs_vsctl('set', 'Interface', EXT_BRIDGE,
-                         'external-ids:ip_address=%s' % ip_address, 
-                         'external-ids:ext_interface=%s' % ex_intf, 
-                         'external-ids:ext_gw_ip_address=%s' % ex_gw_ip)
+        ext_ip_address = "127.0.0.1/24"
+        ext_mac_address = "02:11:22:33:44:55"
+        empty_ip_address = "0.0.0.0"
+        with ipdb.interfaces[ex_intf] as ext_iface:
+            ipv4_addr = ext_iface.ipaddr.ipv4
+            if not ipv4_addr:
+                print "External interface does not have any IP address"
+                return
+            ext_ip_address = ipv4_addr[0]["address"] + '/' + str(ipv4_addr[0]["prefixlen"])
+            ext_mac_address = ext_iface.address
+            for addr in ext_iface.ipaddr:
+                addr_str = '/'.join(map(str, addr))
+                ext_iface.del_ip(addr_str)
+
+        with ipdb.interfaces[EXT_BRIDGE] as ext_bridge_iface:
+            for addr in ext_bridge_iface.ipaddr:
+                addr_str = '/'.join(map(str, addr))
+                ext_bridge_iface.del_ip(addr_str)
+
+            ext_bridge_iface.add_ip(ext_ip_address)
+            addr_config_str = 'other-config:hwaddr=\"' + ext_mac_address + '\"'
+            if ext_bridge_iface.operstate == "DOWN":
+                ext_bridge_iface.up()
+
+            ovs_vsctl('set', 'bridge', EXT_BRIDGE, addr_config_str)
+
+        intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
+        if ex_intf not in intfs:
+            ovs_vsctl('add-port', EXT_BRIDGE, ex_intf)
 
     except Exception as e:
-        raise SonaCniException(108, "failure activate external interface " + str(e))
+        raise SonaException(108, "failure activate external interface " + str(e))
 
 def activate_gw_intf():
     '''
@@ -436,10 +490,11 @@ def activate_gw_intf():
     gw_ip = get_gateway_ip()
     global_cidr = get_global_cidr()
     transient_cidr = get_transient_cidr()
+    transient_local_cidr = get_transient_local_cidr()
     service_cidr = get_service_cidr()
 
     try:
-        with ipdb.interfaces[BRIDGE_NAME] as bridge_iface:
+        with ipdb.interfaces[INT_BRIDGE] as bridge_iface:
             for addr in bridge_iface.ipaddr:
                 addr_str = '/'.join(map(str, addr))
                 bridge_iface.del_ip(addr_str)
@@ -448,10 +503,19 @@ def activate_gw_intf():
             if bridge_iface.operstate == "DOWN":
                 bridge_iface.up()
 
+	with ipdb.interfaces[LOCAL_BRIDGE] as bridge_iface:
+            if bridge_iface.operstate == "DOWN":
+                bridge_iface.up()
+
+            addr_config_str = 'other-config:hwaddr=\"' + DEFAULT_FAKE_MAC + '\"'
+            ovs_vsctl('set', 'bridge', LOCAL_BRIDGE, addr_config_str)
+
         local_found = False
         global_found = False
         transient_found = False
         service_found = False
+	transient_local_found = False
+
         for route in ipdb.routes:
             if route['dst'] == cidr:
                 local_found = True
@@ -461,21 +525,26 @@ def activate_gw_intf():
                 transient_found = True
             if route['dst'] == service_cidr:
                 service_found = True
+            if route['dst'] == transient_local_cidr:
+                transient_local_found = True
 
         if not local_found:
-            ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
 
         if not global_found:
-            ipdb.routes.add(dst=global_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=global_cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
 
         if not transient_found:
-            ipdb.routes.add(dst=transient_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=transient_cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
 
         if not service_found:
-            ipdb.routes.add(dst=service_cidr, oif=ipdb.interfaces[BRIDGE_NAME].index).commit()
+            ipdb.routes.add(dst=service_cidr, oif=ipdb.interfaces[INT_BRIDGE].index).commit()
+
+	if not transient_local_found:
+            ipdb.routes.add(dst=transient_local_cidr, oif=ipdb.interfaces[LOCAL_BRIDGE].index).commit()
 
     except Exception as e:
-        raise SonaCniException(108, "failure activate gateway interface " + str(e))
+        raise SonaException(108, "failure activate gateway interface " + str(e))
 
 def setup_interface(container_id, cni_netns, cni_ifname,
                     mac_address, ip_address):
@@ -584,7 +653,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     create_port(container_id[:31], mac_address, ip_address.split('/')[0])
 
     try:
-        ovs_vsctl('add-port', BRIDGE_NAME, veth_outside, '--', 'set',
+        ovs_vsctl('add-port', INT_BRIDGE, veth_outside, '--', 'set',
                   'interface', veth_outside,
                   'external_ids:attached_mac=%s' % mac_address,
                   'external_ids:iface-id=%s' % iface_id,
@@ -610,7 +679,7 @@ def cni_del(container_id, cni_ifname):
         return
 
     veth_outside = VETH_PREFIX + container_id[:11]
-    ports = ovs_vsctl("list-ports", BRIDGE_NAME)
+    ports = ovs_vsctl("list-ports", INT_BRIDGE)
 
     if veth_outside not in ports:
         return
