@@ -447,6 +447,10 @@ def activate_ex_intf():
     if has_interface(ex_intf) is False:
         return
 
+    intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
+    if ex_intf in intfs:
+        return
+
     try:
         ext_ip_address = "127.0.0.1/24"
         ext_mac_address = "02:11:22:33:44:55"
@@ -474,7 +478,6 @@ def activate_ex_intf():
 
             ovs_vsctl('set', 'bridge', EXT_BRIDGE, addr_config_str)
 
-        intfs = ovs_vsctl('list-ifaces', EXT_BRIDGE)
         if ex_intf not in intfs:
             ovs_vsctl('add-port', EXT_BRIDGE, ex_intf)
 
