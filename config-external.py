@@ -27,7 +27,7 @@ from netaddr import *
 from kubernetes import client, config
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
-SONA_CONFIG_FILE_ENV = os.environ['SONA_CONFIG_FILE_PATH']
+SONA_CONFIG_FILE_ENV = os.environ.get("SONA_CONFIG_FILE_PATH")
 EXTERNAL_GW_IP = "external.gateway.ip"
 EXTERNAL_INTF_NAME = "external.interface.name"
 EXTERNAL_BR_IP = "external.bridge.ip"
