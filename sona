@@ -38,7 +38,8 @@ INSIDE_MTU = 1400
 ONOS_USERNAME = "onos"
 ONOS_PASSWORD = "rocks"
 ONOS_PORT_NUM = "8181"
-ONOS_K8S_PATH = "onos/k8snetworking"
+ONOS_K8S_NODE_PATH = "onos/k8snode"
+ONOS_K8S_NETWORKING_PATH = "onos/k8snetworking"
 
 SONA_CONFIG_FILE = "/etc/sona/sona-cni.conf"
 INT_BRIDGE = "kbr-int"
@@ -137,16 +138,26 @@ def get_node_address(node):
             return address.address
     return None
 
-def request(endpoint, method, data):
+def request(ep_type, endpoint, method, data):
     '''
     A helper method to issue REST API call.
 
-    :param    endpoint:   REST endpoint
-                method:     REST method
-                data:       REST data
+    :param     ep_type:    REST endpoint type (e.g., node, networking)
+               endpoint:   REST endpoint
+               method:     REST method
+               data:       REST data
     :return    REST response
     '''
-    url = "http://" + master_ip() + ":" + ONOS_PORT_NUM + "/" + ONOS_K8S_PATH
+
+    path = ""
+    if ep_type == "node":
+        path = ONOS_K8S_NODE_PATH
+    elif ep_type == "networking":
+        path = ONOS_K8S_NETWORKING_PATH
+    else:
+        path = ONOS_K8S_NODE_PATH
+
+    url = "http://" + master_ip() + ":" + ONOS_PORT_NUM + "/" + path
     url = url + "/" + endpoint
 
     username = ONOS_USERNAME
@@ -186,7 +197,7 @@ def create_port(port_id, mac_address, ip_address):
                        "macAddress": mac_address, "ipAddress": ip_address,
                        "deviceId": dpid})
 
-    resp = request("port", "post", data)
+    resp = request("networking", "port", "post", data)
 
 def delete_port(port_id):
     '''
@@ -196,7 +207,7 @@ def delete_port(port_id):
     :return    REST response
     '''
     endpoint = "port/" + port_id
-    resp = request(endpoint, "delete", None)
+    resp = request("networking", endpoint, "delete", None)
 
 def has_network():
     '''
@@ -209,7 +220,7 @@ def has_network():
 
     net_id = socket.gethostname()
     endpoint = "network" + "/" + "exist" + "/" + net_id
-    resp = request(endpoint, "get", None)
+    resp = request("networking", endpoint, "get", None)
 
     if resp is None:
         return False
@@ -390,7 +401,7 @@ def allocate_ip(network_id):
     endpoint = "ipam" + "/" + network_id
 
     try:
-        ipamJson = request(endpoint, "get", None).json()
+        ipamJson = request("networking", endpoint, "get", None).json()
         allocated_ip = ipamJson["ipam"]["ipAddress"]
 
     except Exception as e:
@@ -408,7 +419,7 @@ def release_ip(ip):
     try:
         network_id = socket.gethostname()
         endpoint = "ipam" + "/" + network_id + "/" + ip
-        request(endpoint, "delete", None)
+        request("networking", endpoint, "delete", None)
 
     except Exception as e:
         raise SonaCniException(106, "failure release IP " + str(e))
