@@ -19,20 +19,24 @@ RUN apt-get -y update && apt-get install -y build-essential upx-ucl tk
 ADD requirements.txt /
 ADD sona /
 ADD config-external.py /
+ADD master-ip.py /
 
 RUN pip install -r /requirements.txt && \
     pip install pyinstaller
 
 RUN pyinstaller --onefile sona
 RUN pyinstaller --onefile config-external.py
+RUN pyinstaller --onefile master-ip.py
 
 FROM python:2-slim
 
 COPY --from=builder /dist/sona /
 COPY --from=builder /dist/config-external /
+COPY --from=builder /dist/master-ip /
 
 ADD install-config.sh /
 ADD install-cni.sh /
+ADD check-control-plane.sh /
 
 LABEL name="SONA CNI" \
       vendor="SK Telecom" \
