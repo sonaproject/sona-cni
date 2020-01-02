@@ -12,14 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM python:2-slim as builder
+FROM centos/python-27-centos7:latest as builder
+ENV LD_LIBRARY_PATH=/opt/rh/python27/root/usr/lib64
+USER root
 
-RUN apt-get -y update && apt-get install -y build-essential upx-ucl tk
+RUN curl "https://bootstrap.pypa.io/get-pip.py" -o "get-pip.py"
+RUN python get-pip.py
+RUN yum install -y build-essential tk
+RUN wget https://github.com/upx/upx/releases/download/v3.95/upx-3.95-amd64_linux.tar.xz
+RUN tar xvf upx-3.95-amd64_linux.tar.xz -C ./
+RUN cp upx-3.95-amd64_linux/upx /bin
 
+RUN mkdir -p /opt/app-root/src
 ADD requirements.txt /
-ADD sona /
-ADD config-external.py /
-ADD master-ip.py /
+ADD sona /opt/app-root/src
+ADD config-external.py /opt/app-root/src
+ADD master-ip.py /opt/app-root/src
 
 RUN pip install -r /requirements.txt && \
     pip install pyinstaller
@@ -32,9 +40,9 @@ FROM python:2-slim
 
 RUN apt-get -y update && apt-get install -y curl
 
-COPY --from=builder /dist/sona /
-COPY --from=builder /dist/config-external /
-COPY --from=builder /dist/master-ip /
+COPY --from=builder /opt/app-root/src/dist/sona /
+COPY --from=builder /opt/app-root/src/dist/config-external /
+COPY --from=builder /opt/app-root/src/dist/master-ip /
 
 ADD install-cni-config.sh /
 ADD install-sona-config.sh /
