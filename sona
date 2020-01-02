@@ -186,14 +186,14 @@ def update_post_on_board_state():
     Updates the kubernetes node's state.
     '''
     node_name = socket.gethostname()
-    resp = request("node", "update/postonboard/" + node_name, "put", None)
+    resp = request("node", "configure/update/postonboard/" + node_name, "put", None)
 
 def is_on_boarded_state():
     '''
     Obtains the kubernetes node's state.
     '''
     node_name = socket.gethostname()
-    resp = request("node", "state/" + node_name, "get", None)
+    resp = request("node", "configure/state/" + node_name, "get", None)
 
     if resp is None:
         return False
