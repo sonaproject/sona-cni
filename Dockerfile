@@ -30,6 +30,8 @@ RUN pyinstaller --onefile master-ip.py
 
 FROM python:2-slim
 
+RUN apt-get -y update && apt-get install -y curl
+
 COPY --from=builder /dist/sona /
 COPY --from=builder /dist/config-external /
 COPY --from=builder /dist/master-ip /
