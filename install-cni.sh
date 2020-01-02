@@ -22,6 +22,8 @@ exit_with_error(){
 # Clean up any existing binaries assets.
 rm -f /host/opt/cni/bin/sona
 
+dir=/host/opt/cni/bin
+
 if [ ! -w "$dir" ];
 then
   echo "$dir is non-writeable, skipping"
