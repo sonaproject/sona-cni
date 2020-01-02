@@ -181,6 +181,26 @@ def request(ep_type, endpoint, method, data):
 
     return resp
 
+def update_post_on_board_state():
+    '''
+    Updates the kubernetes node's state.
+    '''
+    node_name = socket.gethostname()
+    resp = request("node", "update/postonboard/" + node_name, "put", None)
+
+def is_on_boarded_state():
+    '''
+    Obtains the kubernetes node's state.
+    '''
+    node_name = socket.gethostname()
+    resp = request("node", "state/" + node_name, "get", None)
+
+    if resp is None:
+        return False
+    else:
+        result = resp.json()
+        return result["State"] == "ON_BOARDED"
+
 def create_port(port_id, mac_address, ip_address):
     '''
     Creates a container port.
@@ -654,6 +674,11 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     if has_network() is False:
         return
 
+    if is_on_boarded_state() is True:
+        activate_gw_intf()
+        activate_ex_intf()
+        update_post_on_board_state()
+
     ip_address = allocate_ip(get_network_id())
     local_cidr = get_cidr()
     ip_address = ip_address + '/' + local_cidr.split('/')[1]
@@ -674,9 +699,6 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
                   'external_ids:ip_address=%s' % ip_address)
     except Exception as e:
         raise SonaCniException(106, "failure in plugging pod interface" + str(e))
-
-    activate_gw_intf()
-    activate_ex_intf()
 
     output = json.dumps({'ip_address': ip_address, 'mac_address': mac_address})
     print(output)
