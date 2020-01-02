@@ -34,7 +34,8 @@ COPY --from=builder /dist/sona /
 COPY --from=builder /dist/config-external /
 COPY --from=builder /dist/master-ip /
 
-ADD install-config.sh /
+ADD install-cni-config.sh /
+ADD install-sona-config.sh /
 ADD install-cni.sh /
 ADD check-control-plane.sh /
 
