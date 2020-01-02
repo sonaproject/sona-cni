@@ -5,7 +5,7 @@ set -e
 
 while true
 do
-  master_ip=$(master-ip 2>&1)
+  master_ip=$(/master-ip 2>&1)
   check_status_str='curl -sL --user onos:rocks -w "%{http_code}\\n" "http://'$master_ip':8181/onos/k8snode/configure/state/'$KUBERNETES_NODE_NAME'" -o /dev/null'
   if [ $(eval $check_status_str) = "200" ];
   then
