@@ -172,6 +172,9 @@ def request(ep_type, endpoint, method, data):
     elif method == "post":
         resp = session.post(url, data.encode('utf-8'), headers=headers, auth=(username, password))
     elif method == "put":
+        if data is None:
+            data = {}
+            data = json.dumps(data)
         resp = session.put(url, data.encode('utf-8'), headers=headers, auth=(username, password))
     elif method == "delete":
         resp = session.delete(url, auth=(username, password))
