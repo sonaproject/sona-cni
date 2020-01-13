@@ -28,6 +28,7 @@ ADD requirements.txt /
 ADD sona /opt/app-root/src
 ADD config-external.py /opt/app-root/src
 ADD master-ip.py /opt/app-root/src
+ADD replace-master-ip.py /opt/app-root/src
 
 RUN pip install -r /requirements.txt && \
     pip install pyinstaller
@@ -35,6 +36,7 @@ RUN pip install -r /requirements.txt && \
 RUN pyinstaller --onefile sona
 RUN pyinstaller --onefile config-external.py
 RUN pyinstaller --onefile master-ip.py
+RUN pyinstaller --onefile replace-master-ip.py
 
 FROM python:2-slim
 
@@ -43,6 +45,7 @@ RUN apt-get -y update && apt-get install -y curl
 COPY --from=builder /opt/app-root/src/dist/sona /
 COPY --from=builder /opt/app-root/src/dist/config-external /
 COPY --from=builder /opt/app-root/src/dist/master-ip /
+COPY --from=builder /opt/app-root/src/dist/replace-master-ip /
 
 ADD install-cni-config.sh /
 ADD install-sona-config.sh /
