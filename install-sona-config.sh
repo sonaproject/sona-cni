@@ -31,6 +31,12 @@ ${SONA_NETWORK_CONFIG}
 EOF
 fi
 
+# Insert any of the supported "auto" parameters.
+sed -i s/__TUNNEL_TYPE__/"${TUNNEL_TYPE:-VXLAN}"/g $TMP_SONA_CONF
+sed -i s/__MTU_SIZE__/"${MTU_SIZE:-1400}"/g $TMP_SONA_CONF
+sed -i s/__EXTERNAL_INTERFACE__/"${EXTERNAL_INTERFACE:-eth1}"/g $TMP_SONA_CONF
+sed -i s/__EXTERNAL_GATEWAY_IP__/"${EXTERNAL_GATEWAY_IP:-172.16.230.1}"/g $TMP_SONA_CONF
+
 SONA_CONF_NAME=${SONA_CONF_NAME:-sona-cni.conf}
 SONA_OLD_CONF_NAME=${SONA_OLD_CONF_NAME:-sona-cni.conf}
 
