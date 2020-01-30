@@ -191,6 +191,20 @@ def update_post_on_board_state():
     node_name = socket.gethostname()
     resp = request("node", "configure/update/postonboard/" + node_name, "put", None)
 
+def update_ovs_bridge_mtu():
+    '''
+    Updates the OpenvSwitch bridge's own interface MTU request size.
+    '''
+    mtu = get_mtu()
+    mtu_str = "mtu=" + str(mtu)
+    mtu_req_str = "mtu_request=" + str(mtu)
+    ovs_vsctl('set', 'int', INT_BRIDGE, mtu_str)
+    ovs_vsctl('set', 'int', INT_BRIDGE, mtu_req_str)
+    ovs_vsctl('set', 'int', EXT_BRIDGE, mtu_str)
+    ovs_vsctl('set', 'int', EXT_BRIDGE, mtu_req_str)
+    ovs_vsctl('set', 'int', LOCAL_BRIDGE, mtu_str)
+    ovs_vsctl('set', 'int', LOCAL_BRIDGE, mtu_req_str)
+
 def is_on_boarded_state():
     '''
     Obtains the kubernetes node's state.
@@ -412,6 +426,23 @@ def get_external_gateway_ip():
 
     except Exception as e:
         raise SonaCniException(102, "failure get external gateway IP " + str(e))
+
+def get_mtu():
+    '''
+    Obtains the default MTU size of all container and bridge interfaces.
+
+    :return	default MTU size
+    '''
+    try:
+        cf = ConfigParser.ConfigParser()
+        cf.read(SONA_CONFIG_FILE)
+        if cf.has_option("network", "mtu") is True:
+            return cf.get("network", "mtu")
+        else:
+            return INSIDE_MTU
+
+    except Exception as e:
+        raise SonaCniException(102, "failure get MTU size " + str(e))
 
 def allocate_ip(network_id):
     '''
@@ -681,6 +712,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         activate_gw_intf()
         activate_ex_intf()
         update_post_on_board_state()
+        update_ovs_bridge_mtu()
 
     ip_address = allocate_ip(get_network_id())
     local_cidr = get_cidr()
@@ -749,27 +781,7 @@ def cni_version():
     print(json.dumps(json_data))
 
 def main():
-    try:
-        cni_command = os.environ['CNI_COMMAND']
-
-        if cni_command == "VERSION":
-            cni_version()
-        else:
-            cni_ifname = os.environ['CNI_IFNAME']
-            cni_netns = os.environ['CNI_NETNS']
-            cni_args = os.environ['CNI_ARGS']
-            cni_args_dict = dict(i.split("=") for i in cni_args.split(";"))
-            namespace = cni_args_dict['K8S_POD_NAMESPACE']
-            pod_name = cni_args_dict['K8S_POD_NAME']
-            container_id = cni_args_dict['K8S_POD_INFRA_CONTAINER_ID']
-
-            if cni_command == "ADD":
-                cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id)
-            elif cni_command == "DEL":
-                cni_del(container_id, cni_ifname)
-
-    except Exception as e:
-        raise SonaCniException(100, 'required CNI variables missing', str(e))
+    update_ovs_bridge_mtu()
 
 class SonaCniException(Exception):
 
